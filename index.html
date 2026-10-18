@@ -251,7 +251,7 @@ body {
       </div>
       <div class="row">
         <label>滑らかさ λ</label>
-        <input type="range" id="pLambda" min="1" max="15" step="1" value="5">
+        <input type="range" id="pLambda" min="1" max="20" step="1" value="5">
         <span class="vval" id="vLambda">5</span>
       </div>
       <div class="row">
@@ -488,8 +488,8 @@ function dualWallDetect(gray, W, H, axis) {
   const TOP_K = 8;
   const topCands = [];
   const botCands = [];
-  const outerW = 1.2;
-  const HIGH_G_OUTER = 200;
+  const outerW = 0.5;          // [FIX] 位置バイアス削減 (1.2→0.5)
+  // HIGH_G_OUTER removed — 代わりに bestG比例ブーストを使用
 
   for (let x = 0; x < W; x++) {
     const cy = colCY(x);
@@ -514,9 +514,11 @@ function dualWallDetect(gray, W, H, axis) {
     if (bestUpY >= 0 && bestUpG > minG * 0.5)
       if (!up.find(c => c.y === bestUpY)) up.push({y: bestUpY, g: bestUpG});
     if (outerUpY >= 0 && outerUpG >= bestUpG * 0.30) {
+      // [FIX] 固定200でなくbestUpG×1.5を上限とする比例ブースト
+      const outerBoostUp = Math.min(bestUpG * 1.5, Math.max(outerUpG * 1.2, bestUpG));
       const ex = up.find(c => Math.abs(c.y - outerUpY) <= 1);
-      if (!ex) up.push({y: outerUpY, g: HIGH_G_OUTER});
-      else if (ex.g < HIGH_G_OUTER) ex.g = HIGH_G_OUTER;
+      if (!ex) up.push({y: outerUpY, g: outerBoostUp});
+      else if (ex.g < outerBoostUp) ex.g = outerBoostUp;
     }
     up.forEach(c => { c.g = c.g + outerW * (topMax - c.y) / topRange; });
     up.sort((a, b) => b.g - a.g);
@@ -534,9 +536,11 @@ function dualWallDetect(gray, W, H, axis) {
     if (bestDnY >= 0 && bestDnG > minG * 0.5)
       if (!dn.find(c => c.y === bestDnY)) dn.push({y: bestDnY, g: bestDnG});
     if (outerDnY >= 0 && outerDnG >= bestDnG * 0.30) {
+      // [FIX] 固定200でなくbestDnG×1.5を上限とする比例ブースト
+      const outerBoostDn = Math.min(bestDnG * 1.5, Math.max(outerDnG * 1.2, bestDnG));
       const ex = dn.find(c => Math.abs(c.y - outerDnY) <= 1);
-      if (!ex) dn.push({y: outerDnY, g: HIGH_G_OUTER});
-      else if (ex.g < HIGH_G_OUTER) ex.g = HIGH_G_OUTER;
+      if (!ex) dn.push({y: outerDnY, g: outerBoostDn});
+      else if (ex.g < outerBoostDn) ex.g = outerBoostDn;
     }
     dn.forEach(c => { c.g = c.g + outerW * (c.y - botMin) / botRange; });
     dn.sort((a, b) => b.g - a.g);
@@ -726,19 +730,19 @@ function autoTune(f) {
   const snr = medG / Math.max(noiseLevel, 0.5);
   let blur, smooth, lambda, minGrad, method;
   if (snr >= 15) {
-    blur = 1; smooth = 15; lambda = 8;
+    blur = 1; smooth = 15; lambda = 14; // [FIX] 8→14
     minGrad = Math.max(5, Math.min(18, Math.round(medG * 0.22)));
     method = 'dualwall';
   } else if (snr >= 7) {
-    blur = 2; smooth = 20; lambda = 6;
+    blur = 2; smooth = 20; lambda = 10; // [FIX] 6→10
     minGrad = Math.max(4, Math.min(15, Math.round(medG * 0.18)));
     method = 'dualwall';
   } else if (snr >= 3) {
-    blur = 3; smooth = 25; lambda = 4;
+    blur = 3; smooth = 25; lambda = 7;  // [FIX] 4→7
     minGrad = Math.max(3, Math.min(12, Math.round(medG * 0.14)));
     method = 'dualwall';
   } else {
-    blur = 3; smooth = 30; lambda = 3;
+    blur = 3; smooth = 30; lambda = 5;  // [FIX] 3→5
     minGrad = 3;
     method = 'bandedge';
   }
