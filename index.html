@@ -1,0 +1,1553 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OITem Width Measurement</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap">
+<!-- SheetJS for multi-sheet Excel export -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+<style>
+:root {
+  --bg: #0d1117; --bg2: #161b22; --bg3: #21262d;
+  --fg: #e6edf3; --fg2: #8b949e; --fg3: #484f58;
+  --acc: #2f81f7; --acc2: #1f6feb;
+  --ok: #3fb950; --err: #f85149; --warn: #e3b341;
+  --wall1: #ff4471; --wall2: #00bfff;
+  --rad: 6px; --gap: 10px;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0 }
+[hidden] { display: none !important }
+body {
+  background: var(--bg); color: var(--fg);
+  font-family: 'Inter', system-ui, sans-serif; font-size: 13px;
+  display: flex; flex-direction: column; height: 100dvh; overflow: hidden;
+  padding-left: 16px; padding-right: 16px;
+  touch-action: none; /* Spacedesk/iPad: ページ全体のスクロール割り込みを防ぐ */
+}
+
+/* ── Header ── */
+#hdr { background: var(--bg2); border-bottom: 1px solid var(--bg3);
+  padding: 0 16px; height: 44px; display: flex; align-items: center; gap: 12px;
+  flex-shrink: 0; margin: 0 -16px; padding-left: 16px; padding-right: 16px; }
+#hdr h1 { font-size: 14px; font-weight: 600; color: var(--acc); white-space: nowrap }
+#hdr .badge { font-size: 10px; background: var(--acc2); color: #fff;
+  padding: 1px 6px; border-radius: 10px; font-weight: 600 }
+#hdr .spacer { flex: 1 }
+.hbtn { background: var(--bg3); border: 1px solid var(--fg3); border-radius: var(--rad);
+  color: var(--fg); padding: 4px 10px; cursor: pointer; font-size: 12px;
+  transition: background .15s }
+.hbtn:hover { background: var(--bg2); border-color: var(--fg2) }
+.hbtn.primary { background: var(--acc); border-color: var(--acc2); }
+.hbtn.primary:hover { background: var(--acc2) }
+.hbtn:disabled { opacity: .4; cursor: default }
+
+/* ── Layout ── */
+#main { display: flex; flex: 1; overflow: hidden; gap: 0; margin: 0 -16px; }
+
+/* ── File panel ── */
+#filePanel { width: 180px; min-width: 180px; background: var(--bg2);
+  border-right: 1px solid var(--bg3); display: flex; flex-direction: column;
+  overflow: hidden; flex-shrink: 0 }
+#dropZone { border: 2px dashed var(--fg3); border-radius: var(--rad); margin: 8px;
+  padding: 16px 8px; text-align: center; cursor: pointer; transition: border-color .2s;
+  color: var(--fg2); font-size: 11px; line-height: 1.6 }
+#dropZone:hover, #dropZone.over { border-color: var(--acc); color: var(--acc) }
+#dropZone input { display: none }
+#fileList { flex: 1; overflow-y: auto; padding: 4px }
+.fitem { padding: 6px 8px; border-radius: var(--rad); cursor: pointer;
+  border: 1px solid transparent; margin-bottom: 2px; transition: background .15s }
+.fitem:hover { background: var(--bg3) }
+.fitem.active { background: var(--bg3); border-color: var(--acc) }
+.fname { font-size: 11px; word-break: break-all; color: var(--fg) }
+.fstatus { font-size: 10px; margin-top: 2px }
+.fstatus.done { color: var(--ok) }
+.fstatus.busy { color: var(--warn) }
+.fstatus.err  { color: var(--err) }
+.fstatus.pend { color: var(--fg2) }
+
+/* ── Canvas area ── */
+#canvasWrap { flex: 1; position: relative; overflow: hidden;
+  background: #000; display: flex; align-items: center; justify-content: center }
+#canvasStack { position: relative }
+#canvasStack canvas { position: absolute; top: 0; left: 0 }
+#mainC { position: relative }
+#measureC { pointer-events: none }
+#clickC { cursor: crosshair; touch-action: none }
+#canvasWrap { touch-action: none }
+#canvasInfo { position: absolute; bottom: 8px; left: 8px; font-size: 11px;
+  color: var(--fg2); background: rgba(0,0,0,.6); padding: 2px 6px;
+  border-radius: 4px; pointer-events: none }
+
+/* ── Control panel ── */
+#ctrlPanel { width: 220px; min-width: 220px; background: var(--bg2);
+  border-left: 1px solid var(--bg3); display: flex; flex-direction: column;
+  overflow-y: auto; flex-shrink: 0 }
+.csec { padding: 10px 12px; border-bottom: 1px solid var(--bg3) }
+.csec h3 { font-size: 11px; font-weight: 600; color: var(--fg2);
+  text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px }
+.row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px }
+.row label { color: var(--fg2); font-size: 11px; flex: 1 }
+.row input[type=number], .row input[type=range] { background: var(--bg3);
+  border: 1px solid var(--fg3); border-radius: 4px; color: var(--fg);
+  font-size: 12px; width: 62px; padding: 3px 6px }
+.row input[type=range] { width: 100px; padding: 0; accent-color: var(--acc) }
+.row .vval { font-size: 11px; color: var(--fg); min-width: 24px; text-align: right;
+  font-family: 'JetBrains Mono', monospace }
+.method-grp { display: flex; flex-direction: column; gap: 4px }
+.mbtn { background: var(--bg3); border: 1px solid var(--fg3); border-radius: var(--rad);
+  color: var(--fg2); padding: 6px 10px; cursor: pointer; font-size: 12px;
+  text-align: left; transition: all .15s; display: flex; align-items: center; gap: 6px }
+.mbtn:hover { border-color: var(--fg2); color: var(--fg) }
+.mbtn.sel { border-color: var(--acc); color: var(--acc); background: rgba(47,129,247,.08) }
+.mbtn .mtag { font-size: 9px; font-weight: 600; padding: 1px 4px;
+  border-radius: 3px; background: var(--acc); color: #fff; margin-left: auto }
+.mbtn.sel .mtag { background: var(--ok) }
+#btnMeasure { width: 100%; padding: 9px; background: var(--acc); border: none;
+  border-radius: var(--rad); color: #fff; font-weight: 600; font-size: 13px;
+  cursor: pointer; transition: background .15s; margin-top: 4px }
+#btnMeasure:hover { background: var(--acc2) }
+#btnMeasure:disabled { opacity: .4; cursor: default }
+
+/* ── Results ── */
+#results { padding: 10px 12px }
+#results h3 { font-size: 11px; font-weight: 600; color: var(--fg2);
+  text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px }
+.srow { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 8px }
+.sbox { background: var(--bg3); border-radius: var(--rad); padding: 6px 8px }
+.sbox .sv { font-size: 16px; font-weight: 600; font-family: 'JetBrains Mono', monospace }
+.sbox .sl { font-size: 10px; color: var(--fg2); margin-top: 2px }
+#rmseRow { font-size: 11px; color: var(--warn); margin-bottom: 6px; display: none }
+#rtable { width: 100%; border-collapse: collapse; font-size: 11px }
+#rtable th { color: var(--fg2); font-weight: 500; padding: 3px 4px;
+  border-bottom: 1px solid var(--bg3); text-align: right }
+#rtable th:first-child { text-align: left }
+#rtable td { padding: 3px 4px; border-bottom: 1px solid var(--bg3);
+  text-align: right; font-family: 'JetBrains Mono', monospace; font-size: 10px }
+#rtable td:first-child { text-align: left; font-family: inherit }
+#rtable tr.min-row td { color: var(--err) }
+#rtable tr.max-row td { color: var(--ok) }
+
+/* ── Freehand bar ── */
+#fhBar { background: var(--bg2); border-top: 1px solid var(--bg3);
+  padding: 6px 12px; display: none; align-items: center; gap: 8px; flex-shrink: 0 }
+#fhBar.vis { display: flex }
+#fhBar .label { font-size: 11px; color: var(--fg2) }
+.wallbtn { padding: 4px 10px; border-radius: var(--rad); border: 1px solid var(--fg3);
+  background: var(--bg3); color: var(--fg2); cursor: pointer; font-size: 12px;
+  font-weight: 500; transition: all .15s }
+.wallbtn.w1.sel { border-color: var(--wall1); color: var(--wall1) }
+.wallbtn.w2.sel { border-color: var(--wall2); color: var(--wall2) }
+.fhsep { width: 1px; height: 20px; background: var(--bg3) }
+.fhbtn { padding: 4px 10px; border-radius: var(--rad); border: 1px solid var(--fg3);
+  background: var(--bg3); color: var(--fg2); cursor: pointer; font-size: 12px;
+  transition: all .15s }
+.fhbtn:hover { border-color: var(--fg2); color: var(--fg) }
+.fhbtn.go { border-color: var(--ok); color: var(--ok) }
+.fhbtn.go:hover { background: rgba(63,185,80,.1) }
+
+/* ── Share status ── */
+#shareStatus { font-size: 11px; color: var(--ok) }
+
+/* ── Image modal ── */
+#imgModal {
+  position: fixed; inset: 0; background: rgba(0,0,0,.85);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 100; padding: 16px;
+}
+#imgBox {
+  background: var(--bg2); border: 1px solid var(--bg3);
+  border-radius: 8px; padding: 16px; width: min(960px, 100%);
+  max-height: 90dvh; display: flex; flex-direction: column; gap: 8px;
+}
+#imgScroll { overflow-y: auto; max-height: 72dvh; display: flex; flex-direction: column; gap: 12px; padding: 4px; }
+.img-entry { background: #000; border-radius: 4px; overflow: hidden; }
+.img-entry .img-label { font-size: 10px; color: var(--fg2); padding: 4px 8px; background: var(--bg3);
+  display: flex; align-items: center; justify-content: space-between; }
+.img-entry .img-label span { flex: 1 }
+.img-entry img { max-width: 100%; display: block; }
+.dl-btn { padding: 2px 8px; border-radius: 4px; border: 1px solid var(--ok);
+  background: rgba(63,185,80,.1); color: var(--ok); cursor: pointer; font-size: 11px;
+  white-space: nowrap; flex-shrink: 0 }
+.dl-btn:hover { background: rgba(63,185,80,.2) }
+
+/* ── Auto-tune log ── */
+#autoLog { display: none; margin-top: 6px; padding: 6px 8px;
+  background: rgba(47,129,247,.1); border: 1px solid rgba(47,129,247,.3);
+  border-radius: var(--rad); font-size: 10px; color: var(--fg2); line-height: 1.7 }
+#autoLog b { color: var(--acc) }
+
+
+@media (max-width: 640px) {
+  #filePanel { width: 130px; min-width: 130px }
+  #ctrlPanel { width: 160px; min-width: 160px }
+}
+</style>
+</head>
+<body>
+
+<div id="hdr">
+  <h1>OITem Width Measurement</h1>
+  <span class="badge">v2 standalone</span>
+  <div class="spacer"></div>
+  <span id="shareStatus"></span>
+  <button class="hbtn" id="btnShare" disabled>📋 Claudeへ共有</button>
+  <button class="hbtn" id="btnCSV" disabled>⬇ Excel保存</button>
+  <button class="hbtn" id="btnImg" disabled>🖼 画像保存</button>
+  <button class="hbtn" id="btnImgAll" disabled>🖼 全画像一覧</button>
+</div>
+
+<div id="main">
+  <!-- File panel -->
+  <div id="filePanel">
+    <label id="dropZone">
+      <div>📂</div>
+      <div>画像をドロップ（クリックして選択）</div>
+      <div style="margin-top:6px;font-size:10px;color:var(--fg3)">PNG / JPG</div>
+      <input type="file" id="fileInput" multiple accept=".png,.jpg,.jpeg">
+    </label>
+    <div id="fileList"></div>
+  </div>
+
+  <!-- Canvas -->
+  <div id="canvasWrap">
+    <div id="canvasStack">
+      <canvas id="mainC"></canvas>
+      <canvas id="measureC"></canvas>
+      <canvas id="clickC"></canvas>
+    </div>
+    <div id="canvasInfo">画像を読み込んでください</div>
+  </div>
+
+  <!-- Controls -->
+  <div id="ctrlPanel">
+    <!-- Method -->
+    <div class="csec">
+      <h3>検出手法</h3>
+      <div class="method-grp">
+        <button class="mbtn sel" data-m="dualwall" id="m_dualwall">
+          DualWall <span class="mtag">NEW</span>
+        </button>
+        <button class="mbtn" data-m="bandedge" id="m_bandedge">
+          Band Edge
+        </button>
+        <button class="mbtn" data-m="freehand" id="m_freehand">
+          手書き (正解)
+        </button>
+      </div>
+    </div>
+
+    <!-- Params -->
+    <div class="csec" id="paramsDW">
+      <h3>DualWall パラメータ</h3>
+      <div class="row">
+        <label>ブラー σ</label>
+        <input type="range" id="pBlur" min="0" max="5" step="0.5" value="2">
+        <span class="vval" id="vBlur">2</span>
+      </div>
+      <div class="row">
+        <label>平滑化 σ</label>
+        <input type="range" id="pSmooth" min="3" max="40" step="1" value="20">
+        <span class="vval" id="vSmooth">20</span>
+      </div>
+      <div class="row">
+        <label>滑らかさ λ</label>
+        <input type="range" id="pLambda" min="1" max="20" step="1" value="5">
+        <span class="vval" id="vLambda">5</span>
+      </div>
+      <div class="row">
+        <label>最小勾配</label>
+        <input type="range" id="pMinGrad" min="2" max="30" step="1" value="8">
+        <span class="vval" id="vMinGrad">8</span>
+      </div>
+    </div>
+
+    <!-- Measurement -->
+    <div class="csec">
+      <h3>測定設定</h3>
+      <div class="row">
+        <label>スケール<br><span style="font-size:10px;color:var(--fg3)">px/mm</span></label>
+        <input type="number" id="pxPerMm" value="134" min="1" max="1000" step="1">
+      </div>
+      <div class="row">
+        <label>分割数 N</label>
+        <input type="number" id="nDiv" value="40" min="5" max="200" step="1">
+      </div>
+      <div class="row">
+        <label>測定開始 %</label>
+        <input type="range" id="trimS" min="0" max="49" step="1" value="0">
+        <span class="vval" id="vTrimS">0%</span>
+      </div>
+      <div class="row">
+        <label>測定終了 %</label>
+        <input type="range" id="trimE" min="51" max="100" step="1" value="100">
+        <span class="vval" id="vTrimE">100%</span>
+      </div>
+      <button id="btnMeasure" disabled>▶ 測定実行 (自動)</button>
+      <div id="autoLog"></div>
+    </div>
+
+    <!-- Results -->
+    <div id="results">
+      <h3>結果</h3>
+      <div class="srow" id="srow"></div>
+      <div id="rmseRow"></div>
+      <div style="overflow-x:auto">
+        <table id="rtable">
+          <thead><tr>
+            <th>#</th><th>pos(mm)</th><th>px</th><th>mm</th>
+          </tr></thead>
+          <tbody id="rtbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Image modal -->
+<div id="imgModal" hidden>
+  <div id="imgBox">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
+      <span style="font-size:13px;font-weight:600;color:var(--fg)" id="imgModalTitle">オーバーレイ画像</span>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="hbtn" id="btnImgClose">✕</button>
+      </div>
+    </div>
+    <div style="font-size:10px;color:var(--fg2);padding:2px 0">
+      各画像の「⬇ 保存」ボタン、または画像を右クリック → 名前を付けて保存
+    </div>
+    <div id="imgScroll"></div>
+  </div>
+</div>
+
+
+<!-- Freehand bar -->
+<div id="fhBar">
+  <span class="label">手書きモード：</span>
+  <button class="wallbtn w1 sel" id="wallBtn1">壁1</button>
+  <button class="wallbtn w2" id="wallBtn2">壁2</button>
+  <div class="fhsep"></div>
+  <button class="fhbtn go" id="btnFhMeasure">測定</button>
+  <button class="fhbtn" id="btnFhUndo">Undo壁</button>
+  <button class="fhbtn" id="btnFhClear">クリア</button>
+</div>
+
+<!-- ── SCRIPT ─────────────────────────────────────────────────── -->
+<script>
+'use strict';
+
+// ─── State ─────────────────────────────────────────────────────────
+const FILES = [];
+let curIdx = -1;
+let zoom = 1;
+let curMethod = 'dualwall';
+
+let clickPhase = 0;
+
+const mainC   = document.getElementById('mainC');
+const mCtx    = mainC.getContext('2d');
+const measureC = document.getElementById('measureC');
+const oCtx    = measureC.getContext('2d');
+const clickC  = document.getElementById('clickC');
+const cCtx    = clickC.getContext('2d');
+
+let freehandMode  = false;
+let drawingWall   = 1;
+let isFhDrawing   = false;
+let fhStroke      = [];
+let fhStartPt     = null;
+let fhDragged     = false;
+const FH_THR      = 6;
+
+// ─── Helpers ────────────────────────────────────────────────────────
+function getParam(id) { return parseFloat(document.getElementById(id).value) || 0; }
+function px2mm(px) { return px / (getParam('pxPerMm') || 134); }
+function setInfo(s) { document.getElementById('canvasInfo').textContent = s; }
+
+// ─── Download helpers ────────────────────────────────────────────────
+function triggerDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
+function dataUrlToBlob(dataUrl) {
+  const [header, b64] = dataUrl.split(',');
+  const mime = header.match(/:(.*?);/)[1];
+  const bin  = atob(b64);
+  const arr  = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], {type: mime});
+}
+
+function stemName(f) {
+  return f.name.replace(/\.[^.]+$/, '') + '_overlay.png';
+}
+
+// ─── Algorithms ─────────────────────────────────────────────────────
+function toGray(imgData, W, H) {
+  const g = new Uint8Array(W * H);
+  const d = imgData.data;
+  for (let i = 0; i < W*H; i++)
+    g[i] = (77*d[i*4] + 150*d[i*4+1] + 29*d[i*4+2]) >> 8;
+  return g;
+}
+
+function gaussBlur(gray, W, H, sigma) {
+  if (sigma <= 0) return new Uint8Array(gray);
+  const r = Math.ceil(sigma * 2);
+  const tmp = new Float32Array(W * H);
+  const out = new Uint8Array(W * H);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      let s = 0, n = 0;
+      for (let k = -r; k <= r; k++) {
+        const xi = Math.max(0, Math.min(W-1, x+k));
+        s += gray[y*W+xi]; n++;
+      }
+      tmp[y*W+x] = s / n;
+    }
+  }
+  for (let x = 0; x < W; x++) {
+    for (let y = 0; y < H; y++) {
+      let s = 0, n = 0;
+      for (let k = -r; k <= r; k++) {
+        const yi = Math.max(0, Math.min(H-1, y+k));
+        s += tmp[yi*W+x]; n++;
+      }
+      out[y*W+x] = Math.round(s / n);
+    }
+  }
+  return out;
+}
+
+function sobelDy(gray, W, H) {
+  const dy = new Float32Array(W * H);
+  for (let y = 1; y < H-1; y++)
+    for (let x = 0; x < W; x++)
+      dy[y*W+x] = (gray[(y+1)*W+x] - gray[(y-1)*W+x]) * 0.5;
+  return dy;
+}
+
+function adaptiveCenterY(gray, W, H) {
+  const x0 = Math.floor(W*0.25), x1 = Math.floor(W*0.75);
+  const rowAvg = new Float32Array(H);
+  for (let y = 0; y < H; y++) {
+    let s = 0;
+    for (let x = x0; x < x1; x++) s += gray[y*W+x];
+    rowAvg[y] = s / (x1-x0);
+  }
+  const sm = gaussSmooth1D(rowAvg, H, 10);
+  let minV = Infinity, minY = Math.floor(H/2);
+  const y0 = Math.floor(H*0.2), y1 = Math.floor(H*0.8);
+  for (let y = y0; y < y1; y++)
+    if (sm[y] < minV) { minV = sm[y]; minY = y; }
+  return minY;
+}
+
+function gaussSmooth1D(arr, len, sigma) {
+  const r = Math.ceil(sigma * 2.5);
+  const out = new Float32Array(len);
+  for (let i = 0; i < len; i++) {
+    let s = 0, ws = 0;
+    for (let k = -r; k <= r; k++) {
+      const j = Math.max(0, Math.min(len-1, i+k));
+      const w = Math.exp(-k*k / (2*sigma*sigma));
+      s += arr[j]*w; ws += w;
+    }
+    out[i] = s / ws;
+  }
+  return out;
+}
+
+// ── DualWall DP detection ───────────────────────────────────────────
+function dualWallDetect(gray, W, H, axis) {
+  const sigma   = getParam('pBlur');
+  const smSigma = getParam('pSmooth');
+  const lambda  = getParam('pLambda');
+  const minG    = getParam('pMinGrad');
+
+  const blurred = gaussBlur(gray, W, H, sigma);
+  const dy = sobelDy(blurred, W, H);
+
+  const globalCY = adaptiveCenterY(gray, W, H);
+  function colCY(x) {
+    if (!axis) return globalCY;
+    const {p1, p2} = axis;
+    const dx = p2.x - p1.x;
+    const t  = dx === 0 ? 0.5 : Math.max(0, Math.min(1, (x - p1.x) / dx));
+    return Math.round(p1.y + t * (p2.y - p1.y));
+  }
+
+  const halfSearch = Math.round(H * 0.40);
+  const cY = globalCY;
+  const TOP_K = 8;
+  const topCands = [];
+  const botCands = [];
+  const outerW = 0.5;          // [FIX] 位置バイアス削減 (1.2→0.5)
+  // HIGH_G_OUTER removed — 代わりに bestG比例ブーストを使用
+
+  for (let x = 0; x < W; x++) {
+    const cy = colCY(x);
+    const topMin = Math.max(2, cy - halfSearch);
+    const topMax = cy - 2;
+    const botMin = cy + 2;
+    const botMax = Math.min(H - 2, cy + halfSearch);
+    const topRange = Math.max(1, topMax - topMin);
+    const botRange = Math.max(1, botMax - botMin);
+
+    const up = [], dn = [];
+
+    let bestUpG = 0, bestUpY = -1;
+    let outerUpY = -1, outerUpG = 0;
+    for (let y = topMin; y <= topMax; y++) {
+      const g = -dy[y * W + x];
+      if (g > bestUpG) { bestUpG = g; bestUpY = y; }
+      if (outerUpY < 0 && g > minG * 0.6) { outerUpY = y; outerUpG = g; }
+      if (g > minG && g >= -dy[(y-1)*W+x] && g >= -dy[(y+1)*W+x])
+        up.push({y, g});
+    }
+    if (bestUpY >= 0 && bestUpG > minG * 0.5)
+      if (!up.find(c => c.y === bestUpY)) up.push({y: bestUpY, g: bestUpG});
+    if (outerUpY >= 0 && outerUpG >= bestUpG * 0.30) {
+      // [FIX] 固定200でなくbestUpG×1.5を上限とする比例ブースト
+      const outerBoostUp = Math.min(bestUpG * 1.5, Math.max(outerUpG * 1.2, bestUpG));
+      const ex = up.find(c => Math.abs(c.y - outerUpY) <= 1);
+      if (!ex) up.push({y: outerUpY, g: outerBoostUp});
+      else if (ex.g < outerBoostUp) ex.g = outerBoostUp;
+    }
+    up.forEach(c => { c.g = c.g + outerW * (topMax - c.y) / topRange; });
+    up.sort((a, b) => b.g - a.g);
+    topCands.push(up.slice(0, TOP_K));
+
+    let bestDnG = 0, bestDnY = -1;
+    let outerDnY = -1, outerDnG = 0;
+    for (let y = botMax; y >= botMin; y--) {
+      const g = dy[y * W + x];
+      if (g > bestDnG) { bestDnG = g; bestDnY = y; }
+      if (outerDnY < 0 && g > minG * 0.6) { outerDnY = y; outerDnG = g; }
+      if (g > minG && g >= dy[(y-1)*W+x] && g >= dy[(y+1)*W+x])
+        dn.push({y, g});
+    }
+    if (bestDnY >= 0 && bestDnG > minG * 0.5)
+      if (!dn.find(c => c.y === bestDnY)) dn.push({y: bestDnY, g: bestDnG});
+    if (outerDnY >= 0 && outerDnG >= bestDnG * 0.30) {
+      // [FIX] 固定200でなくbestDnG×1.5を上限とする比例ブースト
+      const outerBoostDn = Math.min(bestDnG * 1.5, Math.max(outerDnG * 1.2, bestDnG));
+      const ex = dn.find(c => Math.abs(c.y - outerDnY) <= 1);
+      if (!ex) dn.push({y: outerDnY, g: outerBoostDn});
+      else if (ex.g < outerBoostDn) ex.g = outerBoostDn;
+    }
+    dn.forEach(c => { c.g = c.g + outerW * (c.y - botMin) / botRange; });
+    dn.sort((a, b) => b.g - a.g);
+    botCands.push(dn.slice(0, TOP_K));
+  }
+
+  function medianOf(arr) {
+    const s = arr.slice().sort((a,b) => a-b);
+    return s[Math.floor(s.length / 2)];
+  }
+  const topYs = topCands.map(c => c.length ? c[0].y : -1).filter(y => y >= 0);
+  const botYs = botCands.map(c => c.length ? c[0].y : -1).filter(y => y >= 0);
+  const topFallback = topYs.length ? medianOf(topYs) : Math.floor(cY * 0.35);
+  const botFallback = botYs.length ? medianOf(botYs) : Math.floor(cY + (H - cY) * 0.65);
+
+  function viterbi(cands, fallback) {
+    const padded = cands.map(c => c.length ? c : [{y: fallback, g: 1}]);
+    const best = padded.map(c => new Float32Array(c.length).fill(-1e9));
+    const from = padded.map(c => new Int32Array(c.length).fill(0));
+
+    for (let k = 0; k < padded[0].length; k++)
+      best[0][k] = Math.log1p(padded[0][k].g);
+
+    for (let x = 1; x < W; x++) {
+      const pc = padded[x-1], cc = padded[x];
+      for (let k = 0; k < cc.length; k++) {
+        const yk = cc[k].y;
+        let bv = -1e9, bk = 0;
+        for (let kp = 0; kp < pc.length; kp++) {
+          const v = best[x-1][kp] - lambda * Math.abs(yk - pc[kp].y) / H;
+          if (v > bv) { bv = v; bk = kp; }
+        }
+        best[x][k] = bv + Math.log1p(cc[k].g);
+        from[x][k] = bk;
+      }
+    }
+
+    const path = new Float32Array(W);
+    let k = 0;
+    for (let j = 1; j < padded[W-1].length; j++)
+      if (best[W-1][j] > best[W-1][k]) k = j;
+    path[W-1] = padded[W-1][k].y;
+    for (let x = W-2; x >= 0; x--) {
+      k = from[x+1][k];
+      path[x] = padded[x][k].y;
+    }
+    return path;
+  }
+
+  function medianFilter1D(arr, r) {
+    const out = new Float32Array(arr.length);
+    for (let i = 0; i < arr.length; i++) {
+      const sl = [];
+      for (let k = Math.max(0, i-r); k <= Math.min(arr.length-1, i+r); k++)
+        sl.push(arr[k]);
+      sl.sort((a, b) => a - b);
+      out[i] = sl[Math.floor(sl.length / 2)];
+    }
+    return out;
+  }
+
+  const topRaw = viterbi(topCands, topFallback);
+  const botRaw = viterbi(botCands, botFallback);
+
+  const topMed = medianFilter1D(topRaw, 20);
+  const botMed = medianFilter1D(botRaw, 20);
+
+  const SPIKE_R   = 100;
+  const SPIKE_THR = 30;
+  function spikeReject1D(path, r, thr) {
+    const ref = medianFilter1D(path, r);
+    const out = new Float32Array(path.length);
+    for (let i = 0; i < path.length; i++)
+      out[i] = Math.abs(path[i] - ref[i]) > thr ? ref[i] : path[i];
+    return out;
+  }
+  const topSR = spikeReject1D(topMed, SPIKE_R, SPIKE_THR);
+  const botSR = spikeReject1D(botMed, SPIKE_R, SPIKE_THR);
+
+  const topArr = gaussSmooth1D(topSR, W, smSigma);
+  const botArr = gaussSmooth1D(botSR, W, smSigma);
+  const wpxArr = botArr.map((b, i) => Math.max(0, b - topArr[i]));
+
+  return {topArr, botArr, wpxArr, centerY: cY};
+}
+
+// ── Band Edge ───────────────────────────────────────────────────────
+function bandEdgeDetect(gray, W, H, axis) {
+  const blurred = gaussBlur(gray, W, H, 2);
+  const globalCY = adaptiveCenterY(gray, W, H);
+  const halfSearch = Math.round(H * 0.35);
+
+  function colCY(x) {
+    if (!axis) return globalCY;
+    const {p1, p2} = axis;
+    const dx = p2.x - p1.x;
+    const t  = dx === 0 ? 0.5 : Math.max(0, Math.min(1, (x - p1.x) / dx));
+    return Math.round(p1.y + t * (p2.y - p1.y));
+  }
+
+  const topArr = new Float32Array(W);
+  const botArr = new Float32Array(W);
+
+  for (let x = 0; x < W; x++) {
+    const cy = colCY(x);
+    const topMin = Math.max(1, cy - halfSearch);
+    const botMax = Math.min(H - 2, cy + halfSearch);
+
+    let tY = topMin, tG = 0;
+    for (let y = topMin; y < cy; y++) {
+      const g = Math.abs(blurred[(y+1)*W+x] - blurred[(y-1)*W+x]);
+      if (g > tG) { tG = g; tY = y; }
+    }
+    topArr[x] = tY;
+
+    let bY = botMax, bG = 0;
+    for (let y = botMax; y >= cy; y--) {
+      const g = Math.abs(blurred[(y+1)*W+x] - blurred[(y-1)*W+x]);
+      if (g > bG) { bG = g; bY = y; }
+    }
+    botArr[x] = bY;
+  }
+
+  function median1D(arr, r) {
+    const out = new Float32Array(arr.length);
+    for (let i = 0; i < arr.length; i++) {
+      const sl = [];
+      for (let k = Math.max(0,i-r); k <= Math.min(arr.length-1,i+r); k++) sl.push(arr[k]);
+      sl.sort((a,b)=>a-b);
+      out[i] = sl[Math.floor(sl.length/2)];
+    }
+    return out;
+  }
+  const tS = median1D(topArr, 15);
+  const bS = median1D(botArr, 15);
+  const wpxArr = bS.map((b,i) => Math.max(0, b - tS[i]));
+  return {topArr: tS, botArr: bS, wpxArr, centerY: globalCY};
+}
+
+// ─── Auto-tuning ────────────────────────────────────────────────────
+function autoTune(f) {
+  const { gray, W, H } = f;
+  const blr = gaussBlur(gray, W, H, 1.5);
+  const dy  = sobelDy(blr, W, H);
+  const globalCY = adaptiveCenterY(gray, W, H);
+  const axis = (f.ptStart && f.ptEnd) ? {p1: f.ptStart, p2: f.ptEnd} : null;
+  function colCY(x) {
+    if (!axis) return globalCY;
+    const {p1, p2} = axis;
+    const dx = p2.x - p1.x;
+    const t  = dx === 0 ? 0.5 : Math.max(0, Math.min(1, (x - p1.x) / dx));
+    return Math.round(p1.y + t * (p2.y - p1.y));
+  }
+  const halfSearch = Math.round(H * 0.35);
+  const xS = Math.floor(W * 0.2), xE = Math.floor(W * 0.8);
+  const topGrads = [], botGrads = [];
+  for (let x = xS; x < xE; x++) {
+    const cy = colCY(x);
+    const topMin = Math.max(2, cy - halfSearch);
+    const botMax = Math.min(H - 2, cy + halfSearch);
+    let tMax = 0, bMax = 0;
+    for (let y = topMin; y < cy - 2; y++) {
+      const g = Math.abs(dy[y * W + x]);
+      if (g > tMax) tMax = g;
+    }
+    for (let y = cy + 2; y <= botMax; y++) {
+      const g = Math.abs(dy[y * W + x]);
+      if (g > bMax) bMax = g;
+    }
+    topGrads.push(tMax);
+    botGrads.push(bMax);
+  }
+  topGrads.sort((a, b) => a - b);
+  botGrads.sort((a, b) => a - b);
+  const medTopG = topGrads[Math.floor(topGrads.length * 0.5)];
+  const medBotG = botGrads[Math.floor(botGrads.length * 0.5)];
+  const medG    = (medTopG + medBotG) / 2;
+  let noiseSum = 0, noiseN = 0;
+  const bgRows = Math.max(2, Math.floor(H * 0.08));
+  for (let y = 1; y < bgRows; y++) {
+    for (let x = 0; x < W; x++) {
+      noiseSum += Math.abs(dy[y * W + x]);
+      noiseN++;
+    }
+  }
+  const noiseLevel = noiseN > 0 ? noiseSum / noiseN : 1;
+  const snr = medG / Math.max(noiseLevel, 0.5);
+  let blur, smooth, lambda, minGrad, method;
+  if (snr >= 15) {
+    blur = 1; smooth = 15; lambda = 14; // [FIX] 8→14
+    minGrad = Math.max(5, Math.min(18, Math.round(medG * 0.22)));
+    method = 'dualwall';
+  } else if (snr >= 7) {
+    blur = 2; smooth = 20; lambda = 10; // [FIX] 6→10
+    minGrad = Math.max(4, Math.min(15, Math.round(medG * 0.18)));
+    method = 'dualwall';
+  } else if (snr >= 3) {
+    blur = 3; smooth = 25; lambda = 7;  // [FIX] 4→7
+    minGrad = Math.max(3, Math.min(12, Math.round(medG * 0.14)));
+    method = 'dualwall';
+  } else {
+    blur = 3; smooth = 30; lambda = 5;  // [FIX] 3→5
+    minGrad = 3;
+    method = 'bandedge';
+  }
+  return { blur, smooth, lambda, minGrad, method, snr, medG, noiseLevel };
+}
+
+function applyAutoTune(f) {
+  const res = autoTune(f);
+  curMethod = res.method;
+  f.method  = res.method;
+  document.querySelectorAll('.mbtn').forEach(b => b.classList.remove('sel'));
+  const mb = document.querySelector(`.mbtn[data-m="${res.method}"]`);
+  if (mb) mb.classList.add('sel');
+  document.getElementById('paramsDW').style.display = 'block';
+  function setSlider(id, val) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.value = val;
+    const key = id.charAt(0) === 'p' ? id.slice(1) : id;
+    const vEl = document.getElementById('v' + key.charAt(0).toUpperCase() + key.slice(1));
+    if (vEl) vEl.textContent = val;
+  }
+  setSlider('pBlur',    res.blur);
+  setSlider('pSmooth',  res.smooth);
+  setSlider('pLambda',  res.lambda);
+  setSlider('pMinGrad', res.minGrad);
+  const snrLabel = res.snr >= 15 ? '高コントラスト'
+                 : res.snr >= 7  ? '中コントラスト'
+                 : res.snr >= 3  ? '低コントラスト'
+                 :                 '極低コントラスト';
+  const log = document.getElementById('autoLog');
+  if (log) {
+    log.innerHTML =
+      `<b>Auto選択:</b> ${res.method} &nbsp;|&nbsp; SNR ${res.snr.toFixed(1)} (${snrLabel})<br>` +
+      `blur ${res.blur} &nbsp;·&nbsp; smooth ${res.smooth} &nbsp;·&nbsp; λ ${res.lambda} &nbsp;·&nbsp; minG ${res.minGrad}`;
+    log.style.display = 'block';
+  }
+}
+
+function wallsToBin(topArr, botArr, W, H) {
+  const bin = new Uint8Array(W * H);
+  for (let x = 0; x < W; x++) {
+    const t = Math.max(0, Math.min(H-1, Math.round(topArr[x])));
+    const b = Math.max(0, Math.min(H-1, Math.round(botArr[x])));
+    for (let y = t; y <= b; y++) bin[y*W+x] = 1;
+  }
+  return bin;
+}
+
+function scanPerpRun(bin, W, H, cx, cy, nx, ny) {
+  const MAX = Math.max(W, H);
+  let s = 0, e = 0;
+  for (let d = 0; d <= MAX; d++) {
+    const x = Math.round(cx + d*nx), y = Math.round(cy + d*ny);
+    if (x<0||x>=W||y<0||y>=H||!bin[y*W+x]) { e = d-1; break; }
+    if (d === MAX) e = d;
+  }
+  for (let d = 1; d <= MAX; d++) {
+    const x = Math.round(cx - d*nx), y = Math.round(cy - d*ny);
+    if (x<0||x>=W||y<0||y>=H||!bin[y*W+x]) { s = -(d-1); break; }
+    if (d === MAX) s = -d;
+  }
+  return {s, e};
+}
+
+// ─── Measurement ────────────────────────────────────────────────────
+function measureFile(f) {
+  if (!f.binData || !f.ptStart || !f.ptEnd) return null;
+  const p1 = f.ptStart, p2 = f.ptEnd;
+  const dx = p2.x-p1.x, dy = p2.y-p1.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1) return null;
+  const ux = dx/len, uy = dy/len;
+  const nx = -uy, ny = ux;
+  const pxPerMm = getParam('pxPerMm') || 134;
+  const nDiv    = Math.max(2, Math.round(getParam('nDiv')));
+  const trimS   = getParam('trimS') / 100;
+  const trimE   = getParam('trimE') / 100;
+  const res = [];
+  for (let i = 0; i < nDiv; i++) {
+    const t = nDiv > 1 ? i/(nDiv-1) : 0;
+    const cx = p1.x + t*dx, cy = p1.y + t*dy;
+    const pos_mm = t*len/pxPerMm;
+    if (t < trimS || t > trimE) {
+      res.push({i, pos_mm, cx, cy, p1x:cx,p1y:cy,p2x:cx,p2y:cy, w_px:0, w_mm:0, trimmed:true});
+      continue;
+    }
+    const run = scanPerpRun(f.binData, f.W, f.H, cx, cy, nx, ny);
+    const w = run.e - run.s;
+    if (w < 2) { res.push({i, pos_mm, cx, cy, p1x:cx,p1y:cy,p2x:cx,p2y:cy, w_px:0, w_mm:0}); continue; }
+    res.push({i, pos_mm, cx, cy,
+      p1x: cx+run.e*nx, p1y: cy+run.e*ny,
+      p2x: cx+run.s*nx, p2y: cy+run.s*ny,
+      w_px: w, w_mm: w/pxPerMm});
+  }
+  return res;
+}
+
+// ─── Freehand measurement ───────────────────────────────────────────
+function nearestOnPolyline(pts, qx, qy) {
+  let bd=Infinity, bx=pts[0].x, by=pts[0].y;
+  for (let i=0; i<pts.length-1; i++) {
+    const ax=pts[i].x,ay=pts[i].y,bx2=pts[i+1].x,by2=pts[i+1].y;
+    const ddx=bx2-ax,ddy=by2-ay, lsq=ddx*ddx+ddy*ddy;
+    if(!lsq) continue;
+    const t=Math.max(0,Math.min(1,((qx-ax)*ddx+(qy-ay)*ddy)/lsq));
+    const nx=ax+t*ddx-qx, ny=ay+t*ddy-qy;
+    const d=Math.hypot(nx,ny);
+    if(d<bd){bd=d; bx=ax+t*ddx; by=ay+t*ddy;}
+  }
+  return {x:bx, y:by};
+}
+
+function measureFreehand(f) {
+  if (!f.wall1||!f.wall2||!f.ptStart||!f.ptEnd) return null;
+  const p1=f.ptStart, p2=f.ptEnd;
+  const dax=p2.x-p1.x, day=p2.y-p1.y;
+  const axLen=Math.hypot(dax,day);
+  if(axLen<1) return null;
+  const tx=dax/axLen, ty=day/axLen;
+  const nx=-ty, ny=tx;
+  const pxPerMm=getParam('pxPerMm')||134;
+  const nDiv=Math.max(2,Math.round(getParam('nDiv')));
+  const trimS=getParam('trimS'), trimE=getParam('trimE');
+  const res=[];
+  for(let k=0;k<nDiv;k++){
+    const t=nDiv>1?k/(nDiv-1):0;
+    const pct=t*100, cx=p1.x+t*dax, cy=p1.y+t*day;
+    const pos_mm=t*axLen/pxPerMm;
+    if(pct<trimS||pct>trimE){
+      res.push({i:k,pos_mm,cx,cy,p1x:cx,p1y:cy,p2x:cx,p2y:cy,w_px:0,w_mm:0,trimmed:true});
+      continue;
+    }
+    const n1=nearestOnPolyline(f.wall1,cx,cy);
+    const n2=nearestOnPolyline(f.wall2,cx,cy);
+    const d1=(n1.x-cx)*nx+(n1.y-cy)*ny;
+    const d2=(n2.x-cx)*nx+(n2.y-cy)*ny;
+    const w=Math.abs(d1-d2);
+    res.push({i:k,pos_mm,cx,cy,
+      p1x:cx+d1*nx,p1y:cy+d1*ny,
+      p2x:cx+d2*nx,p2y:cy+d2*ny,
+      w_px:parseFloat(w.toFixed(2)), w_mm:parseFloat((w/pxPerMm).toFixed(4))});
+  }
+  return res;
+}
+
+// ─── Run detection ──────────────────────────────────────────────────
+function runDetect(f) {
+  const m = f.method;
+  const axis = (f.ptStart && f.ptEnd) ? {p1: f.ptStart, p2: f.ptEnd} : null;
+  let walls;
+  if (m === 'dualwall') walls = dualWallDetect(f.gray, f.W, f.H, axis);
+  else                  walls = bandEdgeDetect(f.gray, f.W, f.H, axis);
+  f.topArr = walls.topArr;
+  f.botArr = walls.botArr;
+  f.binData = wallsToBin(walls.topArr, walls.botArr, f.W, f.H);
+  f.centerY = walls.centerY;
+  drawWallOverlay(f);
+}
+
+// ─── Drawing ────────────────────────────────────────────────────────
+function setCanvasSize(W, H) {
+  const wrap = document.getElementById('canvasWrap');
+  const maxW = wrap.clientWidth - 4;
+  const maxH = wrap.clientHeight - 4;
+  zoom = Math.min(1, maxW/W, maxH/H);
+  const dw = Math.round(W*zoom), dh = Math.round(H*zoom);
+  [mainC, measureC, clickC].forEach(c => {
+    c.width = W; c.height = H;
+    c.style.width  = dw+'px';
+    c.style.height = dh+'px';
+  });
+  const stack = document.getElementById('canvasStack');
+  stack.style.width  = dw+'px';
+  stack.style.height = dh+'px';
+}
+
+function renderImage(f) {
+  setCanvasSize(f.W, f.H);
+  mCtx.putImageData(f.imgData, 0, 0);
+  oCtx.clearRect(0, 0, f.W, f.H);
+  cCtx.clearRect(0, 0, f.W, f.H);
+  f._baseImg = mCtx.getImageData(0, 0, f.W, f.H);
+}
+
+function drawWallOverlay(f) {
+  if (!f.topArr || !f.botArr) return;
+  mCtx.putImageData(f._baseImg || f.imgData, 0, 0);
+  mCtx.beginPath();
+  for (let x = 0; x < f.W; x++) {
+    const y = f.topArr[x];
+    x===0 ? mCtx.moveTo(x,y) : mCtx.lineTo(x,y);
+  }
+  mCtx.strokeStyle = 'rgba(255,68,113,0.7)'; mCtx.lineWidth = 2; mCtx.stroke();
+  mCtx.beginPath();
+  for (let x = 0; x < f.W; x++) {
+    const y = f.botArr[x];
+    x===0 ? mCtx.moveTo(x,y) : mCtx.lineTo(x,y);
+  }
+  mCtx.strokeStyle = 'rgba(0,191,255,0.7)'; mCtx.lineWidth = 2; mCtx.stroke();
+}
+
+function drawMeasureOverlay(f) {
+  oCtx.clearRect(0, 0, f.W, f.H);
+  if (!f.results || !f.results.length) return;
+  const r0=f.results[0], rN=f.results[f.results.length-1];
+  oCtx.strokeStyle='rgba(0,212,255,0.5)'; oCtx.lineWidth=1.5;
+  oCtx.setLineDash([8,4]);
+  oCtx.beginPath(); oCtx.moveTo(r0.cx,r0.cy); oCtx.lineTo(rN.cx,rN.cy); oCtx.stroke();
+  oCtx.setLineDash([]);
+  f.results.forEach(r => {
+    if(r.trimmed||r.w_px<2) return;
+    oCtx.strokeStyle='rgba(251,191,36,0.85)'; oCtx.lineWidth=1.5;
+    oCtx.beginPath(); oCtx.moveTo(r.p1x,r.p1y); oCtx.lineTo(r.p2x,r.p2y); oCtx.stroke();
+    oCtx.fillStyle='rgba(0,212,255,0.9)';
+    [[r.p1x,r.p1y],[r.p2x,r.p2y]].forEach(([x,y])=>{
+      oCtx.beginPath(); oCtx.arc(x,y,2,0,Math.PI*2); oCtx.fill();
+    });
+  });
+  oCtx.fillStyle='#00d4ff';
+  oCtx.beginPath(); oCtx.arc(r0.cx,r0.cy,5,0,Math.PI*2); oCtx.fill();
+  oCtx.fillStyle='#ff6b35';
+  oCtx.beginPath(); oCtx.arc(rN.cx,rN.cy,5,0,Math.PI*2); oCtx.fill();
+}
+
+function redrawAxis(f) {
+  cCtx.clearRect(0,0,f.W,f.H);
+  if (freehandMode) { drawFhStrokes(f); return; }
+  if (f.ptStart) {
+    cCtx.fillStyle='#00d4ff';
+    cCtx.beginPath(); cCtx.arc(f.ptStart.x,f.ptStart.y,6,0,Math.PI*2); cCtx.fill();
+    cCtx.fillStyle='#00d4ff'; cCtx.font='bold 12px Inter,sans-serif';
+    cCtx.fillText('P1',f.ptStart.x+9,f.ptStart.y-6);
+  }
+  if (f.ptEnd) {
+    cCtx.fillStyle='#ff6b35';
+    cCtx.beginPath(); cCtx.arc(f.ptEnd.x,f.ptEnd.y,6,0,Math.PI*2); cCtx.fill();
+    cCtx.fillStyle='#ff6b35';
+    cCtx.fillText('P2',f.ptEnd.x+9,f.ptEnd.y-6);
+    cCtx.strokeStyle='rgba(0,212,255,0.4)'; cCtx.lineWidth=1.5;
+    cCtx.setLineDash([8,4]);
+    cCtx.beginPath(); cCtx.moveTo(f.ptStart.x,f.ptStart.y); cCtx.lineTo(f.ptEnd.x,f.ptEnd.y); cCtx.stroke();
+    cCtx.setLineDash([]);
+  }
+}
+
+// ─── Results display ────────────────────────────────────────────────
+function showResults(f) {
+  const active = (f.results||[]).filter(r=>!r.trimmed&&r.w_mm>0);
+  const ws = active.map(r=>r.w_mm);
+  if (!ws.length) return;
+  const min=Math.min(...ws), max=Math.max(...ws);
+  const avg=ws.reduce((a,b)=>a+b,0)/ws.length;
+  const std=ws.length>1?Math.sqrt(ws.map(v=>(v-avg)**2).reduce((a,b)=>a+b,0)/(ws.length-1)):0;
+  const cv=(std/avg*100).toFixed(1);
+  const cvCol=cv<3?'var(--ok)':cv<8?'var(--warn)':'var(--err)';
+  document.getElementById('srow').innerHTML=`
+    <div class="sbox"><div class="sv" style="color:var(--ok)">${avg.toFixed(3)}</div><div class="sl">平均 mm</div></div>
+    <div class="sbox"><div class="sv" style="color:${cvCol}">${cv}%</div><div class="sl">CV</div></div>
+    <div class="sbox"><div class="sv" style="color:var(--err)">${min.toFixed(3)}</div><div class="sl">最小 mm</div></div>
+    <div class="sbox"><div class="sv" style="color:var(--fg2)">${std.toFixed(3)}</div><div class="sl">SD mm</div></div>
+  `;
+  const fhR = document.getElementById('rmseRow');
+  if (f.freehandResults && f.method !== 'freehand') {
+    const fhAct = f.freehandResults.filter(r=>!r.trimmed&&r.w_mm>0);
+    const n=Math.min(active.length,fhAct.length);
+    let sse=0;
+    for(let i=0;i<n;i++) sse+=(active[i].w_mm-fhAct[i].w_mm)**2;
+    const rmse=Math.sqrt(sse/n);
+    fhR.textContent=`vs 手書き RMSE: ${rmse.toFixed(4)} mm  (n=${n})`;
+    fhR.style.display='block';
+  } else { fhR.style.display='none'; }
+  const tbody=document.getElementById('rtbody');
+  tbody.innerHTML=active.slice(0,60).map(r=>{
+    const isMin=r.w_mm===min, isMax=r.w_mm===max;
+    return `<tr class="${isMin?'min-row':isMax?'max-row':''}">
+      <td>#${r.i}</td><td>${r.pos_mm.toFixed(3)}</td>
+      <td>${Math.round(r.w_px)}</td><td>${r.w_mm.toFixed(4)}</td></tr>`;
+  }).join('');
+  document.getElementById('btnShare').disabled=false;
+  document.getElementById('btnCSV').disabled=false;
+  document.getElementById('btnImg').disabled=false;
+  document.getElementById('btnImgAll').disabled=false;
+}
+
+// ─── File loading ────────────────────────────────────────────────────
+async function loadFiles(fileList) {
+  for (const file of fileList) {
+    const ext = file.name.split('.').pop().toLowerCase();
+    let imgData, W, H;
+    try {
+      if (ext==='tif'||ext==='tiff') {
+        const buf = await file.arrayBuffer();
+        if (typeof Tiff !== 'undefined') {
+          const tiff = new Tiff({buffer: buf});
+          const tc = tiff.toCanvas();
+          W=tc.width; H=tc.height;
+          const ctx2=tc.getContext('2d');
+          imgData=ctx2.getImageData(0,0,W,H);
+        } else {
+          throw new Error('TIFF library not loaded — please convert to PNG');
+        }
+      } else {
+        const url = URL.createObjectURL(file);
+        const img = await new Promise((res,rej)=>{
+          const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=url;
+        });
+        const c=document.createElement('canvas');
+        c.width=W=img.naturalWidth; c.height=H=img.naturalHeight;
+        const ctx2=c.getContext('2d');
+        ctx2.drawImage(img,0,0);
+        imgData=ctx2.getImageData(0,0,W,H);
+        URL.revokeObjectURL(url);
+      }
+    } catch(e) {
+      FILES.push({name:file.name,error:e.message,status:'err'});
+      renderFileList();
+      continue;
+    }
+    const gray = toGray(imgData, W, H);
+    FILES.push({name:file.name, imgData, gray, W, H, status:'pend',
+                method:curMethod, results:null, freehandResults:null,
+                ptStart:null, ptEnd:null, wall1:null, wall2:null });
+    renderFileList();
+  }
+  if (curIdx < 0 && FILES.length > 0) selectFile(0);
+}
+
+// ─── File list ──────────────────────────────────────────────────────
+function renderFileList() {
+  const el=document.getElementById('fileList');
+  el.innerHTML=FILES.map((f,i)=>`
+    <div class="fitem ${i===curIdx?'active':''}" onclick="selectFile(${i})">
+      <div class="fname">${f.name}</div>
+      <div class="fstatus ${f.status}">${
+        f.status==='done'?'✓ 完了':
+        f.status==='err' ?'✗ '+f.error:
+        f.status==='busy'?'⟳ 処理中':'待機'
+      }</div>
+    </div>`).join('');
+}
+
+function selectFile(idx) {
+  curIdx=idx;
+  clickPhase=0;
+  renderFileList();
+  const f=FILES[idx];
+  if(f.error){setInfo(f.error); return;}
+  renderImage(f);
+  if(f.topArr) drawWallOverlay(f);
+  if(f.results) { drawMeasureOverlay(f); showResults(f); }
+  redrawAxis(f);
+  setInfo(`${f.W}×${f.H}px | ${f.name}`);
+  document.getElementById('btnMeasure').disabled = !(f.ptStart&&f.ptEnd);
+  if (freehandMode) drawFhStrokes(f);
+}
+
+// ─── Canvas click: set P1/P2 ─────────────────────────────────────────
+function ptrToImg(e) {
+  const rect=clickC.getBoundingClientRect();
+  return { x:(e.clientX-rect.left)/zoom, y:(e.clientY-rect.top)/zoom };
+}
+
+clickC.addEventListener('click', e=>{
+  if (freehandMode||curIdx<0) return;
+  const f=FILES[curIdx]; if(!f||f.error) return;
+  const pt=ptrToImg(e);
+  if (!f.ptStart || (f.ptStart&&f.ptEnd)) {
+    f.ptStart={x:Math.round(pt.x),y:Math.round(pt.y)}; f.ptEnd=null;
+    setInfo('P1設定済み — P2をクリック');
+  } else {
+    f.ptEnd={x:Math.round(pt.x),y:Math.round(pt.y)};
+    const len=Math.hypot(f.ptEnd.x-f.ptStart.x,f.ptEnd.y-f.ptStart.y);
+    setInfo(`軸長 ${(len/(getParam('pxPerMm')||134)).toFixed(2)}mm`);
+    document.getElementById('btnMeasure').disabled=false;
+  }
+  redrawAxis(f);
+});
+
+// ─── Measure button ──────────────────────────────────────────────────
+document.getElementById('btnMeasure').addEventListener('click', ()=>{
+  if(curIdx<0) return;
+  const f=FILES[curIdx];
+  if (curMethod==='freehand') {
+    f.method='freehand';
+    const r=measureFreehand(f);
+    if(!r){alert('壁1・壁2と測定軸(P1-P2)を先に設定してください。'); return;}
+    f.results=r; f.freehandResults=r; f.status='done';
+    drawMeasureOverlay(f);
+    showResults(f);
+    renderFileList();
+  } else {
+    applyAutoTune(f);
+    f.method = curMethod;
+    f.status = 'busy';
+    renderFileList();
+    setTimeout(()=>{
+      runDetect(f);
+      const r=measureFile(f);
+      if(!r){f.status='err'; f.error='測定失敗'; renderFileList(); return;}
+      f.results=r; f.status='done';
+      drawMeasureOverlay(f);
+      showResults(f);
+      renderFileList();
+    }, 0);
+  }
+});
+
+// ─── Method selection ────────────────────────────────────────────────
+document.querySelectorAll('.mbtn[data-m]').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    curMethod=btn.dataset.m;
+    document.querySelectorAll('.mbtn').forEach(b=>b.classList.remove('sel'));
+    btn.classList.add('sel');
+    if(curIdx>=0) FILES[curIdx].method=curMethod;
+    if (curMethod==='freehand') enterFreehand();
+    else if (freehandMode) exitFreehand();
+    document.getElementById('paramsDW').style.display =
+      (curMethod==='dualwall'||curMethod==='bandedge')?'block':'none';
+  });
+});
+
+// Sliders
+[['pBlur','vBlur'],['pSmooth','vSmooth'],['pLambda','vLambda'],['pMinGrad','vMinGrad'],
+ ['trimS','vTrimS',v=>v+'%'],['trimE','vTrimE',v=>v+'%']].forEach(([id,vid,fmt])=>{
+  const el=document.getElementById(id);
+  if(!el) return;
+  const vEl=document.getElementById(vid);
+  el.addEventListener('input',()=>{
+    vEl.textContent=(fmt?fmt(el.value):el.value);
+  });
+});
+
+// ─── Excel export (multi-sheet) ──────────────────────────────────────
+function buildXLSX() {
+  const done = FILES.filter(f => f.results && f.status === 'done');
+  if (!done.length) return null;
+  const pxPerMm = getParam('pxPerMm') || 134;
+  const wb = XLSX.utils.book_new();
+
+  // ── Sheet 1: Summary ──
+  const sumHeader = ['filename','method','scale_px_per_mm','img_w_px','img_h_px',
+                     'n','min_mm','max_mm','avg_mm','sd_mm','cv_pct'];
+  const sumRows = [sumHeader];
+  done.forEach(f => {
+    const ws = f.results.filter(r => !r.trimmed && r.w_mm > 0).map(r => r.w_mm);
+    if (!ws.length) return;
+    const avg = ws.reduce((a,b) => a+b, 0) / ws.length;
+    const sd  = Math.sqrt(ws.map(v=>(v-avg)**2).reduce((a,b)=>a+b,0) / ws.length);
+    sumRows.push([
+      f.name, f.method||'auto', pxPerMm, f.W, f.H,
+      ws.length,
+      +Math.min(...ws).toFixed(4), +Math.max(...ws).toFixed(4),
+      +avg.toFixed(4), +sd.toFixed(4), +(sd/avg*100).toFixed(2)
+    ]);
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sumRows), 'Summary');
+
+  // ── Sheets 2…N: one per image ──
+  const usedNames = new Set(['Summary']);
+  done.forEach(f => {
+    const ws = f.results.filter(r => !r.trimmed && r.w_mm > 0).map(r => r.w_mm);
+    const avg = ws.length ? ws.reduce((a,b)=>a+b,0)/ws.length : 0;
+    const sd  = ws.length > 1
+      ? Math.sqrt(ws.map(v=>(v-avg)**2).reduce((a,b)=>a+b,0)/(ws.length-1)) : 0;
+
+    // Sheet name: stem of filename, max 31 chars (Excel limit), unique
+    let shName = f.name.replace(/\.[^.]+$/, '').replace(/[:\\\/\?\*\[\]]/g, '_').slice(0, 31);
+    let suffix = 2;
+    while (usedNames.has(shName)) { shName = shName.slice(0, 28) + '_' + suffix++; }
+    usedNames.add(shName);
+
+    const rows = [];
+    // Stats block at top
+    rows.push(['filename', f.name]);
+    rows.push(['method', f.method||'auto']);
+    rows.push(['scale_px_per_mm', pxPerMm]);
+    rows.push(['img_size_px', `${f.W}×${f.H}`]);
+    rows.push(['n', ws.length]);
+    rows.push(['avg_mm', +avg.toFixed(4)]);
+    rows.push(['sd_mm',  +sd.toFixed(4)]);
+    rows.push(['min_mm', ws.length ? +Math.min(...ws).toFixed(4) : '']);
+    rows.push(['max_mm', ws.length ? +Math.max(...ws).toFixed(4) : '']);
+    rows.push(['cv_pct', ws.length ? +(sd/avg*100).toFixed(2) : '']);
+    rows.push([]);
+    // Detail table
+    rows.push(['point','pos_mm','center_x','center_y','w_px','w_mm']);
+    f.results.filter(r => !r.trimmed).forEach(r => {
+      rows.push([
+        r.i, +r.pos_mm.toFixed(4),
+        Math.round(r.cx), Math.round(r.cy),
+        Math.round(r.w_px), +r.w_mm.toFixed(4)
+      ]);
+    });
+
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), shName);
+  });
+
+  return wb;
+}
+
+document.getElementById('btnCSV').addEventListener('click', () => {
+  if (typeof XLSX === 'undefined') {
+    alert('SheetJSが読み込まれていません。ネット接続を確認してください。');
+    return;
+  }
+  const wb = buildXLSX();
+  if (!wb) return;
+  const buf  = XLSX.write(wb, {bookType: 'xlsx', type: 'array'});
+  const blob = new Blob([buf], {type: 'application/octet-stream'});
+  triggerDownload(blob, 'OIT_results.xlsx');
+});
+
+// ─── Composite overlay image for any file ───────────────────────────
+function compositeFile(f) {
+  const tmp = document.createElement('canvas');
+  tmp.width = f.W; tmp.height = f.H;
+  const ctx = tmp.getContext('2d');
+  ctx.putImageData(f.imgData, 0, 0);
+  if (f.topArr && f.botArr) {
+    ctx.beginPath();
+    for (let x = 0; x < f.W; x++) { x===0 ? ctx.moveTo(x, f.topArr[x]) : ctx.lineTo(x, f.topArr[x]); }
+    ctx.strokeStyle = 'rgba(255,68,113,0.85)'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.beginPath();
+    for (let x = 0; x < f.W; x++) { x===0 ? ctx.moveTo(x, f.botArr[x]) : ctx.lineTo(x, f.botArr[x]); }
+    ctx.strokeStyle = 'rgba(0,191,255,0.85)'; ctx.lineWidth = 2; ctx.stroke();
+  }
+  if (f.results) {
+    const r0 = f.results[0], rN = f.results[f.results.length-1];
+    ctx.strokeStyle = 'rgba(0,212,255,0.5)'; ctx.lineWidth = 1.5;
+    ctx.setLineDash([8,4]);
+    ctx.beginPath(); ctx.moveTo(r0.cx,r0.cy); ctx.lineTo(rN.cx,rN.cy); ctx.stroke();
+    ctx.setLineDash([]);
+    f.results.forEach(r => {
+      if (r.trimmed || r.w_px < 2) return;
+      ctx.strokeStyle = 'rgba(251,191,36,0.85)'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(r.p1x,r.p1y); ctx.lineTo(r.p2x,r.p2y); ctx.stroke();
+      ctx.fillStyle = 'rgba(0,212,255,0.9)';
+      [[r.p1x,r.p1y],[r.p2x,r.p2y]].forEach(([x,y]) => {
+        ctx.beginPath(); ctx.arc(x,y,2,0,Math.PI*2); ctx.fill();
+      });
+    });
+    ctx.fillStyle = '#00d4ff';
+    ctx.beginPath(); ctx.arc(r0.cx,r0.cy,5,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#ff6b35';
+    ctx.beginPath(); ctx.arc(rN.cx,rN.cy,5,0,Math.PI*2); ctx.fill();
+  }
+  return tmp.toDataURL('image/png');
+}
+
+// ─── Image modal ─────────────────────────────────────────────────────
+let _modalFiles = [];
+
+function openImgModal(files) {
+  _modalFiles = files;
+  const scroll = document.getElementById('imgScroll');
+  scroll.innerHTML = '';
+  files.forEach(f => {
+    const dataUrl = compositeFile(f);
+    const sn = stemName(f);
+    const div = document.createElement('div');
+    div.className = 'img-entry';
+    // Label row with download button
+    const lbl = document.createElement('div');
+    lbl.className = 'img-label';
+    const span = document.createElement('span');
+    span.textContent = `${sn}  (${f.W}×${f.H}px)`;
+    const dlBtn = document.createElement('button');
+    dlBtn.className = 'dl-btn';
+    dlBtn.textContent = '⬇ 保存';
+    dlBtn.addEventListener('click', () => {
+      triggerDownload(dataUrlToBlob(dataUrl), sn);
+    });
+    lbl.appendChild(span);
+    lbl.appendChild(dlBtn);
+    const img = document.createElement('img');
+    img.src = dataUrl; img.alt = f.name;
+    div.appendChild(lbl); div.appendChild(img);
+    scroll.appendChild(div);
+  });
+  const n = files.length;
+  document.getElementById('imgModalTitle').textContent =
+    n === 1 ? `オーバーレイ画像 — ${files[0].name}` : `オーバーレイ画像 — ${n}枚まとめて`;
+  document.getElementById('imgModal').hidden = false;
+}
+
+// 現在画像のみ
+document.getElementById('btnImg').addEventListener('click', () => {
+  if (curIdx < 0) return;
+  const f = FILES[curIdx];
+  if (!f || f.error || !f.results) return;
+  openImgModal([f]);
+});
+
+// 全測定済み画像まとめて一覧
+document.getElementById('btnImgAll').addEventListener('click', () => {
+  const done = FILES.filter(f => f.results && f.status === 'done');
+  if (!done.length) return;
+  openImgModal(done);
+});
+
+document.getElementById('btnImgClose').addEventListener('click', () => {
+  document.getElementById('imgModal').hidden = true;
+  document.getElementById('imgScroll').innerHTML = '';
+});
+document.getElementById('imgModal').addEventListener('click', e => {
+  if (e.target === document.getElementById('imgModal')) {
+    document.getElementById('imgModal').hidden = true;
+    document.getElementById('imgScroll').innerHTML = '';
+  }
+});
+
+// ─── Share to Claude ─────────────────────────────────────────────────
+document.getElementById('btnShare').addEventListener('click', ()=>{
+  if(curIdx<0) return;
+  const f=FILES[curIdx]; if(!f.results) return;
+  const pxPerMm=getParam('pxPerMm')||134;
+  const act=f.results.filter(r=>!r.trimmed&&r.w_mm>0);
+  const ws=act.map(r=>r.w_mm);
+  const avg=ws.reduce((a,b)=>a+b,0)/ws.length;
+  const sd=ws.length>1?Math.sqrt(ws.map(v=>(v-avg)**2).reduce((a,b)=>a+b,0)/(ws.length-1)):0;
+  const lines=['=== OIT Microfluidics 測定レポート ===',
+    `画像: ${f.name}`, `サイズ: ${f.W}×${f.H}px`,
+    `スケール: ${pxPerMm} px/mm`, `測定方法: ${f.method||'auto'}`,
+    '',`--- 統計 ---`,`測定点数: ${ws.length}`,
+    `最小幅: ${Math.min(...ws).toFixed(4)} mm`,
+    `最大幅: ${Math.max(...ws).toFixed(4)} mm`,
+    `平均幅: ${avg.toFixed(4)} mm`, `標準偏差: ${sd.toFixed(4)} mm`,
+    `CV: ${(sd/avg*100).toFixed(2)}%`,
+    '','--- 測定値 (pos_mm, w_px, w_mm) ---',
+    ...act.map(r=>`${r.pos_mm.toFixed(3)}\t${Math.round(r.w_px)}\t${r.w_mm.toFixed(4)}`),
+    '',`--- Claudeへ ---`,
+    f.method==='freehand'
+      ? 'これは手書きモードで測定した正解データです。自動検出アルゴリズムの改善に活用してください。'
+      : `自動検出 (${f.method}) の結果です。手書きとの差異や改善点を教えてください。`
+  ];
+  const text=lines.join('\n');
+  navigator.clipboard.writeText(text).catch(()=>{
+    const ta=document.createElement('textarea');
+    ta.value=text; ta.style.cssText='position:fixed;opacity:0';
+    document.body.appendChild(ta); ta.select(); document.execCommand('copy');
+    document.body.removeChild(ta);
+  });
+  const st=document.getElementById('shareStatus');
+  st.textContent='✓ コピー完了'; setTimeout(()=>st.textContent='',2500);
+});
+
+// ─── File drop / input ───────────────────────────────────────────────
+const dz=document.getElementById('dropZone');
+dz.addEventListener('click', ()=>document.getElementById('fileInput').click());
+dz.addEventListener('dragover', e=>{e.preventDefault();dz.classList.add('over')});
+dz.addEventListener('dragleave', ()=>dz.classList.remove('over'));
+dz.addEventListener('drop', e=>{
+  e.preventDefault(); dz.classList.remove('over');
+  loadFiles([...e.dataTransfer.files]);
+});
+document.getElementById('fileInput').addEventListener('change', e=>{
+  loadFiles([...e.target.files]); e.target.value='';
+});
+
+// ─── FREEHAND MODE ───────────────────────────────────────────────────
+function enterFreehand() {
+  freehandMode=true;
+  document.getElementById('fhBar').classList.add('vis');
+  setActiveWall(1);
+  if(curIdx>=0) drawFhStrokes(FILES[curIdx]);
+}
+function exitFreehand() {
+  freehandMode=false; isFhDrawing=false; fhStroke=[];
+  document.getElementById('fhBar').classList.remove('vis');
+  if(curIdx>=0) redrawAxis(FILES[curIdx]);
+}
+function setActiveWall(w) {
+  drawingWall=w;
+  document.getElementById('wallBtn1').classList.toggle('sel',w===1);
+  document.getElementById('wallBtn2').classList.toggle('sel',w===2);
+}
+
+function ptrToImgFh(e) {
+  const r=clickC.getBoundingClientRect();
+  return {x:(e.clientX-r.left)/zoom, y:(e.clientY-r.top)/zoom};
+}
+
+function smoothPts(pts,maxPts=600,avgR=3){
+  if(pts.length<2) return pts;
+  let sub=pts;
+  if(pts.length>maxPts){
+    sub=[]; const step=(pts.length-1)/(maxPts-1);
+    for(let i=0;i<maxPts;i++) sub.push(pts[Math.round(i*step)]);
+  }
+  return sub.map((_,i)=>{
+    let sx=0,sy=0,n=0;
+    for(let j=Math.max(0,i-avgR);j<=Math.min(sub.length-1,i+avgR);j++){
+      sx+=sub[j].x; sy+=sub[j].y; n++;
+    }
+    return {x:sx/n,y:sy/n};
+  });
+}
+
+function drawFhStrokes(f) {
+  if(!f) return;
+  cCtx.clearRect(0,0,f.W,f.H);
+  if(f.wall1&&f.wall1.length>1){
+    cCtx.beginPath(); cCtx.moveTo(f.wall1[0].x,f.wall1[0].y);
+    f.wall1.forEach(p=>cCtx.lineTo(p.x,p.y));
+    cCtx.strokeStyle='rgba(255,68,113,0.9)'; cCtx.lineWidth=3;
+    cCtx.lineJoin='round'; cCtx.lineCap='round'; cCtx.stroke();
+  }
+  if(f.wall2&&f.wall2.length>1){
+    cCtx.beginPath(); cCtx.moveTo(f.wall2[0].x,f.wall2[0].y);
+    f.wall2.forEach(p=>cCtx.lineTo(p.x,p.y));
+    cCtx.strokeStyle='rgba(0,191,255,0.9)'; cCtx.lineWidth=3;
+    cCtx.lineJoin='round'; cCtx.lineCap='round'; cCtx.stroke();
+  }
+  if(f.ptStart&&f.ptEnd){
+    cCtx.strokeStyle='rgba(0,212,255,0.4)'; cCtx.lineWidth=1.5;
+    cCtx.setLineDash([8,4]);
+    cCtx.beginPath(); cCtx.moveTo(f.ptStart.x,f.ptStart.y);
+    cCtx.lineTo(f.ptEnd.x,f.ptEnd.y); cCtx.stroke(); cCtx.setLineDash([]);
+  }
+  ['ptStart','ptEnd'].forEach((k,i)=>{
+    if(!f[k]) return;
+    cCtx.fillStyle=i?'#ff6b35':'#00d4ff';
+    cCtx.beginPath(); cCtx.arc(f[k].x,f[k].y,6,0,Math.PI*2); cCtx.fill();
+  });
+}
+
+clickC.addEventListener('pointerdown', e=>{
+  if(!freehandMode||curIdx<0) return;
+  // マウスは左ボタンのみ；ペン(pen)とタッチ(touch)はbutton判定をスキップ
+  if(e.pointerType==='mouse'&&e.button!==0) return;
+  e.preventDefault(); clickC.setPointerCapture(e.pointerId);
+  fhStartPt=ptrToImgFh(e); fhDragged=false;
+  isFhDrawing=true; fhStroke=[fhStartPt];
+});
+clickC.addEventListener('pointermove', e=>{
+  if(!freehandMode||!isFhDrawing) return;
+  e.preventDefault();
+  const pt=ptrToImgFh(e);
+  if(!fhDragged&&fhStartPt){
+    if(Math.hypot(pt.x-fhStartPt.x,pt.y-fhStartPt.y)>FH_THR) fhDragged=true;
+  }
+  fhStroke.push(pt);
+  if(curIdx>=0){
+    drawFhStrokes(FILES[curIdx]);
+    if(fhStroke.length>1){
+      cCtx.beginPath(); cCtx.moveTo(fhStroke[0].x,fhStroke[0].y);
+      fhStroke.forEach(p=>cCtx.lineTo(p.x,p.y));
+      cCtx.strokeStyle=drawingWall===1?'rgba(255,68,113,0.6)':'rgba(0,191,255,0.6)';
+      cCtx.lineWidth=3; cCtx.setLineDash([4,4]); cCtx.stroke(); cCtx.setLineDash([]);
+    }
+  }
+});
+function finishFhStroke(){
+  if(!isFhDrawing||!freehandMode||curIdx<0) return;
+  isFhDrawing=false;
+  const f=FILES[curIdx];
+  if(!fhDragged){
+    const pt=fhStartPt, ix=Math.round(pt.x), iy=Math.round(pt.y);
+    if(!f.ptStart||(f.ptStart&&f.ptEnd)){
+      f.ptStart={x:ix,y:iy}; f.ptEnd=null;
+    } else {
+      f.ptEnd={x:ix,y:iy};
+    }
+    document.getElementById('btnMeasure').disabled=!(f.ptStart&&f.ptEnd);
+  } else if(fhStroke.length>1){
+    const sm=smoothPts(fhStroke);
+    if(drawingWall===1) f.wall1=sm; else f.wall2=sm;
+  }
+  fhStroke=[]; fhStartPt=null; fhDragged=false;
+  drawFhStrokes(f);
+}
+clickC.addEventListener('pointerup',   e=>{e.preventDefault();finishFhStroke();});
+clickC.addEventListener('pointercancel',e=>{e.preventDefault();finishFhStroke();});
+
+document.getElementById('wallBtn1').addEventListener('click',()=>setActiveWall(1));
+document.getElementById('wallBtn2').addEventListener('click',()=>setActiveWall(2));
+document.getElementById('btnFhMeasure').addEventListener('click',()=>{
+  document.getElementById('btnMeasure').click();
+});
+document.getElementById('btnFhUndo').addEventListener('click',()=>{
+  if(curIdx<0) return; const f=FILES[curIdx];
+  if(drawingWall===1) f.wall1=null; else f.wall2=null;
+  oCtx.clearRect(0,0,f.W,f.H); mCtx.putImageData(f.imgData,0,0);
+  drawFhStrokes(f);
+});
+document.getElementById('btnFhClear').addEventListener('click',()=>{
+  if(curIdx<0) return; const f=FILES[curIdx];
+  f.wall1=null; f.wall2=null; f.freehandResults=null;
+  f.results=null; f.status='pend';
+  oCtx.clearRect(0,0,f.W,f.H); mCtx.putImageData(f.imgData,0,0);
+  drawFhStrokes(f); renderFileList();
+  document.getElementById('srow').innerHTML='';
+  document.getElementById('rtbody').innerHTML='';
+});
+
+// Load TIFF library dynamically
+(function(){
+  const s=document.createElement('script');
+  s.src='https://unpkg.com/tiff@6.1.0/dist/tiff.min.js';
+  s.onerror=()=>console.warn('TIFF library failed to load — TIFF files not supported');
+  document.head.appendChild(s);
+})();
+</script>
+</body>
+</html>
