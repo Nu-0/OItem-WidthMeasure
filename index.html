@@ -96,6 +96,11 @@ body {
 .row .vval { font-size: 11px; color: var(--fg); min-width: 24px; text-align: right;
   font-family: 'JetBrains Mono', monospace }
 .method-grp { display: flex; flex-direction: column; gap: 4px }
+.param-tabs { display: flex; gap: 3px; margin-bottom: 10px; border-bottom: 1px solid var(--bg3); padding-bottom: 6px }
+.ptab { flex: 1; padding: 4px 0; font-size: 11px; font-weight: 600; background: var(--bg3);
+  border: 1px solid var(--fg3); border-radius: var(--rad); color: var(--fg2);
+  cursor: pointer; transition: background .12s, color .12s }
+.ptab.sel { background: var(--acc); border-color: var(--acc); color: #fff }
 .mbtn { background: var(--bg3); border: 1px solid var(--fg3); border-radius: var(--rad);
   color: var(--fg2); padding: 6px 10px; cursor: pointer; font-size: 12px;
   text-align: left; transition: all .15s; display: flex; align-items: center; gap: 6px }
@@ -109,6 +114,13 @@ body {
   cursor: pointer; transition: background .15s; margin-top: 4px }
 #btnMeasure:hover { background: var(--acc2) }
 #btnMeasure:disabled { opacity: .4; cursor: default }
+#btnRedetect { width: 100%; padding: 7px; background: var(--ok); border: none;
+  border-radius: var(--rad); color: #fff; font-weight: 600; font-size: 12px;
+  cursor: pointer; transition: background .15s; margin-top: 5px }
+#btnRedetect:hover { filter: brightness(1.12) }
+#btnRedetect:disabled { opacity: .4; cursor: default }
+#btnCorrect:hover:not(:disabled) { filter: brightness(1.12) }
+#btnCorrect:disabled { opacity: .4; cursor: default }
 
 /* ── Results ── */
 #results { padding: 10px 12px }
@@ -171,6 +183,8 @@ body {
   background: rgba(63,185,80,.1); color: var(--ok); cursor: pointer; font-size: 11px;
   white-space: nowrap; flex-shrink: 0 }
 .dl-btn:hover { background: rgba(63,185,80,.2) }
+.img-cb { width: 16px; height: 16px; accent-color: var(--acc); cursor: pointer; flex-shrink: 0; margin-right: 4px; }
+.img-entry.unchecked { opacity: 0.45 }
 
 /* ── Auto-tune log ── */
 #autoLog { display: none; margin-top: 6px; padding: 6px 8px;
@@ -224,7 +238,11 @@ body {
   <div id="ctrlPanel">
     <!-- Method -->
     <div class="csec">
-      <h3>検出手法</h3>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
+        <h3 style="margin-bottom:0">検出手法</h3>
+        <button id="btnFhReveal" title="手書きモードを表示/非表示"
+          style="font-size:10px;color:var(--fg3);background:none;border:none;cursor:pointer;padding:2px 4px;border-radius:3px">手書き ▾</button>
+      </div>
       <div class="method-grp">
         <button class="mbtn sel" data-m="dualwall" id="m_dualwall">
           DualWall <span class="mtag">NEW</span>
@@ -232,7 +250,8 @@ body {
         <button class="mbtn" data-m="bandedge" id="m_bandedge">
           Band Edge
         </button>
-        <button class="mbtn" data-m="freehand" id="m_freehand">
+        <button class="mbtn" data-m="freehand" id="m_freehand"
+          style="display:none;border-style:dashed;opacity:0.8">
           手書き (正解)
         </button>
       </div>
@@ -240,26 +259,68 @@ body {
 
     <!-- Params -->
     <div class="csec" id="paramsDW">
-      <h3>DualWall パラメータ</h3>
-      <div class="row">
-        <label>ブラー σ</label>
-        <input type="range" id="pBlur" min="0" max="5" step="0.5" value="2">
-        <span class="vval" id="vBlur">2</span>
+      <div class="param-tabs" id="paramTabBar">
+        <button class="ptab sel" data-pane="detect">検出</button>
+        <button class="ptab" data-pane="fh">手書き</button>
       </div>
-      <div class="row">
-        <label>平滑化 σ</label>
-        <input type="range" id="pSmooth" min="3" max="40" step="1" value="20">
-        <span class="vval" id="vSmooth">20</span>
+      <!-- Detection params pane -->
+      <div id="pane-detect">
+        <div class="row">
+          <label>ブラー σ</label>
+          <input type="range" id="pBlur" min="0" max="5" step="0.5" value="2">
+          <span class="vval" id="vBlur">2</span>
+        </div>
+        <div class="row">
+          <label>平滑化 σ</label>
+          <input type="range" id="pSmooth" min="3" max="40" step="1" value="20">
+          <span class="vval" id="vSmooth">20</span>
+        </div>
+        <div class="row">
+          <label>滑らかさ λ</label>
+          <input type="range" id="pLambda" min="1" max="20" step="1" value="5">
+          <span class="vval" id="vLambda">5</span>
+        </div>
+        <div class="row">
+          <label>最小勾配</label>
+          <input type="range" id="pMinGrad" min="2" max="30" step="1" value="8">
+          <span class="vval" id="vMinGrad">8</span>
+        </div>
+        <div class="row">
+          <label>内壁補正 px<br><span style="font-size:10px;color:var(--fg3)">＋→幅を縮小</span></label>
+          <input type="range" id="pEdgeOff" min="-20" max="40" step="1" value="0">
+          <span class="vval" id="vEdgeOff">0</span>
+        </div>
+        <div class="row">
+          <label>探索範囲 px<br><span style="font-size:10px;color:var(--fg3)">中心から±最大</span></label>
+          <input type="range" id="pMaxDev" min="50" max="400" step="10" value="200">
+          <span class="vval" id="vMaxDev">200</span>
+        </div>
       </div>
-      <div class="row">
-        <label>滑らかさ λ</label>
-        <input type="range" id="pLambda" min="1" max="20" step="1" value="5">
-        <span class="vval" id="vLambda">5</span>
-      </div>
-      <div class="row">
-        <label>最小勾配</label>
-        <input type="range" id="pMinGrad" min="2" max="30" step="1" value="8">
-        <span class="vval" id="vMinGrad">8</span>
+      <!-- Freehand params pane -->
+      <div id="pane-fh" hidden>
+        <div style="display:flex;gap:4px;margin-bottom:8px">
+          <button class="wallbtn w1 sel" id="pWallBtn1">壁1</button>
+          <button class="wallbtn w2" id="pWallBtn2">壁2</button>
+          <button class="fhbtn" id="pBtnFhUndo" style="margin-left:auto">Undo壁</button>
+        </div>
+        <button id="btnCorrect" disabled style="width:100%;padding:7px;margin-bottom:10px;
+          background:var(--fg3,#666);border:none;border-radius:var(--rad);color:#fff;
+          font-weight:600;font-size:12px;cursor:pointer;transition:background .15s">🖊 訂正モード</button>
+        <div class="row">
+          <label>平滑化半径<br><span style="font-size:10px;color:var(--fg3)">大きいほど滑らか</span></label>
+          <input type="range" id="pFhSmooth" min="1" max="12" step="1" value="3">
+          <span class="vval" id="vFhSmooth">3</span>
+        </div>
+        <div class="row">
+          <label>訂正ブレンド px<br><span style="font-size:10px;color:var(--fg3)">境界のなじみ幅</span></label>
+          <input type="range" id="pFhBlend" min="1" max="20" step="1" value="4">
+          <span class="vval" id="vFhBlend">4</span>
+        </div>
+        <div class="row">
+          <label>最大サンプル点<br><span style="font-size:10px;color:var(--fg3)">ストローク精度</span></label>
+          <input type="range" id="pFhMaxPts" min="100" max="1200" step="100" value="600">
+          <span class="vval" id="vFhMaxPts">600</span>
+        </div>
       </div>
     </div>
 
@@ -272,19 +333,20 @@ body {
       </div>
       <div class="row">
         <label>分割数 N</label>
-        <input type="number" id="nDiv" value="40" min="5" max="200" step="1">
+        <input type="number" id="nDiv" value="200" min="5" max="200" step="1">
       </div>
       <div class="row">
         <label>測定開始 %</label>
-        <input type="range" id="trimS" min="0" max="49" step="1" value="0">
-        <span class="vval" id="vTrimS">0%</span>
+        <input type="range" id="trimS" min="0" max="49" step="1" value="15">
+        <span class="vval" id="vTrimS">15%</span>
       </div>
       <div class="row">
         <label>測定終了 %</label>
-        <input type="range" id="trimE" min="51" max="100" step="1" value="100">
-        <span class="vval" id="vTrimE">100%</span>
+        <input type="range" id="trimE" min="51" max="100" step="1" value="85">
+        <span class="vval" id="vTrimE">85%</span>
       </div>
       <button id="btnMeasure" disabled>▶ 測定実行 (自動)</button>
+      <button id="btnRedetect" disabled>🔄 現パラメータで再検出</button>
       <div id="autoLog"></div>
     </div>
 
@@ -308,14 +370,18 @@ body {
 <!-- Image modal -->
 <div id="imgModal" hidden>
   <div id="imgBox">
-    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
+    <!-- Header row -->
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
       <span style="font-size:13px;font-weight:600;color:var(--fg)" id="imgModalTitle">オーバーレイ画像</span>
-      <div style="display:flex;gap:8px;align-items:center">
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <button class="hbtn" id="btnImgSelAll">☑ 全選択</button>
+        <button class="hbtn" id="btnImgSelNone">☐ 全解除</button>
+        <button class="hbtn primary" id="btnImgBulkSave">⬇ 選択保存 (0)</button>
         <button class="hbtn" id="btnImgClose">✕</button>
       </div>
     </div>
     <div style="font-size:10px;color:var(--fg2);padding:2px 0">
-      各画像の「⬇ 保存」ボタン、または画像を右クリック → 名前を付けて保存
+      チェックした画像をまとめて保存、または各行の「⬇」で個別保存
     </div>
     <div id="imgScroll"></div>
   </div>
@@ -359,6 +425,8 @@ let fhStroke      = [];
 let fhStartPt     = null;
 let fhDragged     = false;
 const FH_THR      = 6;
+let correctMode   = false;
+let corrHistory   = [];
 
 // ─── Helpers ────────────────────────────────────────────────────────
 function getParam(id) { return parseFloat(document.getElementById(id).value) || 0; }
@@ -472,6 +540,7 @@ function dualWallDetect(gray, W, H, axis) {
   const smSigma = getParam('pSmooth');
   const lambda  = getParam('pLambda');
   const minG    = getParam('pMinGrad');
+  const maxDev  = getParam('pMaxDev') || 200;
 
   const blurred = gaussBlur(gray, W, H, sigma);
   const dy = sobelDy(blurred, W, H);
@@ -485,13 +554,14 @@ function dualWallDetect(gray, W, H, axis) {
     return Math.round(p1.y + t * (p2.y - p1.y));
   }
 
-  const halfSearch = Math.round(H * 0.40);
+  const halfSearch = Math.min(Math.round(H * 0.40), maxDev);
   const cY = globalCY;
   const TOP_K = 8;
   const topCands = [];
   const botCands = [];
-  const outerW = 0.5;          // [FIX] 位置バイアス削減 (1.2→0.5)
-  // HIGH_G_OUTER removed — 代わりに bestG比例ブーストを使用
+  // innerW: 内壁（輪郭）を優先するための位置バイアス重み
+  // 正値 = 中心側エッジ優先（内壁検出）、0 = ニュートラル
+  const innerW = 0.6;
 
   for (let x = 0; x < W; x++) {
     const cy = colCY(x);
@@ -504,47 +574,53 @@ function dualWallDetect(gray, W, H, axis) {
 
     const up = [], dn = [];
 
+    // ── 上壁（top wall）: 内壁 = y が大きい側（中心側）──
     let bestUpG = 0, bestUpY = -1;
-    let outerUpY = -1, outerUpG = 0;
+    let innerUpY = -1, innerUpG = 0;   // innermost = 最も中心寄りの有意エッジ
     for (let y = topMin; y <= topMax; y++) {
       const g = -dy[y * W + x];
       if (g > bestUpG) { bestUpG = g; bestUpY = y; }
-      if (outerUpY < 0 && g > minG * 0.6) { outerUpY = y; outerUpG = g; }
+      // ループ終端が中心寄りなので keep updating → last = innermost
+      if (g > minG * 0.6) { innerUpY = y; innerUpG = g; }
       if (g > minG && g >= -dy[(y-1)*W+x] && g >= -dy[(y+1)*W+x])
         up.push({y, g});
     }
     if (bestUpY >= 0 && bestUpG > minG * 0.5)
       if (!up.find(c => c.y === bestUpY)) up.push({y: bestUpY, g: bestUpG});
-    if (outerUpY >= 0 && outerUpG >= bestUpG * 0.30) {
-      // [FIX] 固定200でなくbestUpG×1.5を上限とする比例ブースト
-      const outerBoostUp = Math.min(bestUpG * 1.5, Math.max(outerUpG * 1.2, bestUpG));
-      const ex = up.find(c => Math.abs(c.y - outerUpY) <= 1);
-      if (!ex) up.push({y: outerUpY, g: outerBoostUp});
-      else if (ex.g < outerBoostUp) ex.g = outerBoostUp;
+    // 内壁候補をブースト
+    if (innerUpY >= 0 && innerUpG >= bestUpG * 0.25) {
+      const innerBoostUp = Math.min(bestUpG * 1.6, Math.max(innerUpG * 1.2, bestUpG * 0.9));
+      const ex = up.find(c => Math.abs(c.y - innerUpY) <= 1);
+      if (!ex) up.push({y: innerUpY, g: innerBoostUp});
+      else if (ex.g < innerBoostUp) ex.g = innerBoostUp;
     }
-    up.forEach(c => { c.g = c.g + outerW * (topMax - c.y) / topRange; });
+    // 位置バイアス: y が大きいほど（中心寄り = 内壁）スコアを加算
+    up.forEach(c => { c.g = c.g + innerW * (c.y - topMin) / topRange; });
     up.sort((a, b) => b.g - a.g);
     topCands.push(up.slice(0, TOP_K));
 
+    // ── 下壁（bot wall）: 内壁 = y が小さい側（中心側）──
     let bestDnG = 0, bestDnY = -1;
-    let outerDnY = -1, outerDnG = 0;
+    let innerDnY = -1, innerDnG = 0;   // innermost = 最も中心寄りの有意エッジ
     for (let y = botMax; y >= botMin; y--) {
       const g = dy[y * W + x];
       if (g > bestDnG) { bestDnG = g; bestDnY = y; }
-      if (outerDnY < 0 && g > minG * 0.6) { outerDnY = y; outerDnG = g; }
+      // ループ終端が中心寄りなので keep updating → last = innermost
+      if (g > minG * 0.6) { innerDnY = y; innerDnG = g; }
       if (g > minG && g >= dy[(y-1)*W+x] && g >= dy[(y+1)*W+x])
         dn.push({y, g});
     }
     if (bestDnY >= 0 && bestDnG > minG * 0.5)
       if (!dn.find(c => c.y === bestDnY)) dn.push({y: bestDnY, g: bestDnG});
-    if (outerDnY >= 0 && outerDnG >= bestDnG * 0.30) {
-      // [FIX] 固定200でなくbestDnG×1.5を上限とする比例ブースト
-      const outerBoostDn = Math.min(bestDnG * 1.5, Math.max(outerDnG * 1.2, bestDnG));
-      const ex = dn.find(c => Math.abs(c.y - outerDnY) <= 1);
-      if (!ex) dn.push({y: outerDnY, g: outerBoostDn});
-      else if (ex.g < outerBoostDn) ex.g = outerBoostDn;
+    // 内壁候補をブースト
+    if (innerDnY >= 0 && innerDnG >= bestDnG * 0.25) {
+      const innerBoostDn = Math.min(bestDnG * 1.6, Math.max(innerDnG * 1.2, bestDnG * 0.9));
+      const ex = dn.find(c => Math.abs(c.y - innerDnY) <= 1);
+      if (!ex) dn.push({y: innerDnY, g: innerBoostDn});
+      else if (ex.g < innerBoostDn) ex.g = innerBoostDn;
     }
-    dn.forEach(c => { c.g = c.g + outerW * (c.y - botMin) / botRange; });
+    // 位置バイアス: y が小さいほど（中心寄り = 内壁）スコアを加算
+    dn.forEach(c => { c.g = c.g + innerW * (botMax - c.y) / botRange; });
     dn.sort((a, b) => b.g - a.g);
     botCands.push(dn.slice(0, TOP_K));
   }
@@ -622,8 +698,58 @@ function dualWallDetect(gray, W, H, axis) {
   const topSR = spikeReject1D(topMed, SPIKE_R, SPIKE_THR);
   const botSR = spikeReject1D(botMed, SPIKE_R, SPIKE_THR);
 
-  const topArr = gaussSmooth1D(topSR, W, smSigma);
-  const botArr = gaussSmooth1D(botSR, W, smSigma);
+  const topSmooth = gaussSmooth1D(topSR, W, smSigma);
+  const botSmooth = gaussSmooth1D(botSR, W, smSigma);
+
+  // 探索範囲クランプ: centerYから±maxDev以内に強制（培地境界への逸脱防止）
+  const topClamped = topSmooth.map((y, i) => {
+    const cy = colCY(i);
+    return Math.max(cy - maxDev, Math.min(cy - 2, y));
+  });
+  const botClamped = botSmooth.map((y, i) => {
+    const cy = colCY(i);
+    return Math.min(cy + maxDev, Math.max(cy + 2, y));
+  });
+
+  // === 対称性ベース補正: 壁の逃げを幾何学的非対称で検出・修正 ===
+  // 培地境界も強いグラジエントを持つためグラジエント比較は使わず、
+  // 中心からの距離比（bDist/tDist）で「逃げ」を判定する。
+
+  // 幅の IQR 外れ値閾値
+  const wList = new Float32Array(W);
+  for (let x = 0; x < W; x++) wList[x] = botClamped[x] - topClamped[x];
+  const wSort = Array.from(wList).sort((a, b) => a - b);
+  const wMed  = wSort[Math.floor(W * 0.50)];
+  const wIQR  = wSort[Math.floor(W * 0.75)] - wSort[Math.floor(W * 0.25)];
+  const WIDE  = wMed + 1.8 * wIQR; // この幅を超えた列を外れとみなす
+
+  // 非対称比閾値: 一方が他方の ASYM_THR 倍以上離れていたら「逃げ」
+  const ASYM_THR = 1.55;
+
+  const topFix = Array.from(topClamped);
+  const botFix = Array.from(botClamped);
+  for (let x = 0; x < W; x++) {
+    const cy    = colCY(x);
+    const tDist = cy - topFix[x]; // 上壁→中心距離（正値）
+    const bDist = botFix[x] - cy; // 下壁→中心距離（正値）
+    const w     = tDist + bDist;
+    if (w <= WIDE) continue;       // 正常幅の列はスキップ
+    if (bDist > tDist * ASYM_THR && tDist > 8) {
+      // 下壁が逃げた: 上壁距離をミラーして推定（±10%非対称を許容）
+      botFix[x] = cy + Math.min(bDist, tDist * 1.10);
+    } else if (tDist > bDist * ASYM_THR && bDist > 8) {
+      // 上壁が逃げた: 下壁距離をミラーして推定
+      topFix[x] = cy - Math.min(tDist, bDist * 1.10);
+    }
+  }
+  // 補正後スムージング（弱め: 過度な平滑化を避ける）
+  const topFinal = gaussSmooth1D(new Float32Array(topFix), W, Math.min(smSigma * 0.5, 10));
+  const botFinal = gaussSmooth1D(new Float32Array(botFix), W, Math.min(smSigma * 0.5, 10));
+
+  // 内壁補正オフセット: topを下げ(+)、botを上げ(-) → 幅を縮小
+  const edgeOff = getParam('pEdgeOff');
+  const topArr = topFinal.map((y, i) => Math.min(y + edgeOff, botFinal[i] - 2));
+  const botArr = botFinal.map((y, i) => Math.max(y - edgeOff, topFinal[i] + 2));
   const wpxArr = botArr.map((b, i) => Math.max(0, b - topArr[i]));
 
   return {topArr, botArr, wpxArr, centerY: cY};
@@ -771,6 +897,8 @@ function applyAutoTune(f) {
   setSlider('pSmooth',  res.smooth);
   setSlider('pLambda',  res.lambda);
   setSlider('pMinGrad', res.minGrad);
+  setSlider('pEdgeOff', 0);   // 内壁補正デフォルト
+  setSlider('pMaxDev', 200);  // 探索範囲デフォルト
   const snrLabel = res.snr >= 15 ? '高コントラスト'
                  : res.snr >= 7  ? '中コントラスト'
                  : res.snr >= 3  ? '低コントラスト'
@@ -1033,32 +1161,18 @@ function showResults(f) {
 // ─── File loading ────────────────────────────────────────────────────
 async function loadFiles(fileList) {
   for (const file of fileList) {
-    const ext = file.name.split('.').pop().toLowerCase();
     let imgData, W, H;
     try {
-      if (ext==='tif'||ext==='tiff') {
-        const buf = await file.arrayBuffer();
-        if (typeof Tiff !== 'undefined') {
-          const tiff = new Tiff({buffer: buf});
-          const tc = tiff.toCanvas();
-          W=tc.width; H=tc.height;
-          const ctx2=tc.getContext('2d');
-          imgData=ctx2.getImageData(0,0,W,H);
-        } else {
-          throw new Error('TIFF library not loaded — please convert to PNG');
-        }
-      } else {
-        const url = URL.createObjectURL(file);
-        const img = await new Promise((res,rej)=>{
-          const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=url;
-        });
-        const c=document.createElement('canvas');
-        c.width=W=img.naturalWidth; c.height=H=img.naturalHeight;
-        const ctx2=c.getContext('2d');
-        ctx2.drawImage(img,0,0);
-        imgData=ctx2.getImageData(0,0,W,H);
-        URL.revokeObjectURL(url);
-      }
+      const url = URL.createObjectURL(file);
+      const img = await new Promise((res,rej)=>{
+        const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=url;
+      });
+      const c=document.createElement('canvas');
+      c.width=W=img.naturalWidth; c.height=H=img.naturalHeight;
+      const ctx2=c.getContext('2d');
+      ctx2.drawImage(img,0,0);
+      imgData=ctx2.getImageData(0,0,W,H);
+      URL.revokeObjectURL(url);
     } catch(e) {
       FILES.push({name:file.name,error:e.message,status:'err'});
       renderFileList();
@@ -1090,6 +1204,7 @@ function renderFileList() {
 function selectFile(idx) {
   curIdx=idx;
   clickPhase=0;
+  corrHistory=[]; // reset correction history on file switch
   renderFileList();
   const f=FILES[idx];
   if(f.error){setInfo(f.error); return;}
@@ -1099,7 +1214,10 @@ function selectFile(idx) {
   redrawAxis(f);
   setInfo(`${f.W}×${f.H}px | ${f.name}`);
   document.getElementById('btnMeasure').disabled = !(f.ptStart&&f.ptEnd);
-  if (freehandMode) drawFhStrokes(f);
+  document.getElementById('btnRedetect').disabled = !(f.results && f.gray && curMethod!=='freehand');
+  document.getElementById('btnCorrect').disabled = !(f.topArr && f.botArr);
+  if (freehandMode&&!correctMode) drawFhStrokes(f);
+  if (correctMode) { drawWallOverlay(f); cCtx.clearRect(0,0,f.W,f.H); }
 }
 
 // ─── Canvas click: set P1/P2 ─────────────────────────────────────────
@@ -1125,6 +1243,18 @@ clickC.addEventListener('click', e=>{
 });
 
 // ─── Measure button ──────────────────────────────────────────────────
+function saveFileParams(f) {
+  f.params = {
+    scale:    getParam('pxPerMm') || 134,
+    blur:     getParam('pBlur'),
+    smooth:   getParam('pSmooth'),
+    lambda:   getParam('pLambda'),
+    minGrad:  getParam('pMinGrad'),
+    edgeOff:  getParam('pEdgeOff'),
+    maxDev:   getParam('pMaxDev'),
+  };
+}
+
 document.getElementById('btnMeasure').addEventListener('click', ()=>{
   if(curIdx<0) return;
   const f=FILES[curIdx];
@@ -1132,6 +1262,7 @@ document.getElementById('btnMeasure').addEventListener('click', ()=>{
     f.method='freehand';
     const r=measureFreehand(f);
     if(!r){alert('壁1・壁2と測定軸(P1-P2)を先に設定してください。'); return;}
+    saveFileParams(f);
     f.results=r; f.freehandResults=r; f.status='done';
     drawMeasureOverlay(f);
     showResults(f);
@@ -1145,12 +1276,65 @@ document.getElementById('btnMeasure').addEventListener('click', ()=>{
       runDetect(f);
       const r=measureFile(f);
       if(!r){f.status='err'; f.error='測定失敗'; renderFileList(); return;}
+      saveFileParams(f);
       f.results=r; f.status='done';
       drawMeasureOverlay(f);
       showResults(f);
       renderFileList();
+      document.getElementById('btnRedetect').disabled=false;
+      document.getElementById('btnCorrect').disabled=false;
     }, 0);
   }
+});
+
+// 再検出ボタン: auto-tune なしで現在のスライダー値をそのまま使用
+document.getElementById('btnRedetect').addEventListener('click', ()=>{
+  if(curIdx<0) return;
+  const f=FILES[curIdx];
+  if (!f.gray) return;
+  const m = curMethod === 'freehand' ? 'dualwall' : curMethod;
+  f.method = m;
+  f.status = 'busy';
+  renderFileList();
+  setTimeout(()=>{
+    runDetect(f);
+    const r = measureFile(f);
+    if(!r){f.status='err'; f.error='測定失敗'; renderFileList(); return;}
+    saveFileParams(f);
+    f.results=r; f.status='done';
+    drawMeasureOverlay(f);
+    showResults(f);
+    renderFileList();
+    // ログ更新
+    const log = document.getElementById('autoLog');
+    if(log) {
+      const p = f.params;
+      log.innerHTML = `<b>再検出完了</b><br>blur=${p.blur} smooth=${p.smooth} λ=${p.lambda} minG=${p.minGrad} edgeOff=${p.edgeOff} maxDev=${p.maxDev}`;
+    }
+  }, 0);
+});
+
+// ─── Freehand button reveal toggle ──────────────────────────────────
+(()=>{
+  const btn=document.getElementById('btnFhReveal');
+  const fhBtn=document.getElementById('m_freehand');
+  let vis=false;
+  btn.addEventListener('click',()=>{
+    vis=!vis;
+    fhBtn.style.display=vis?'':'none';
+    btn.textContent=vis?'手書き ▴':'手書き ▾';
+    btn.style.color=vis?'var(--acc)':'var(--fg3)';
+  });
+})();
+
+// ─── Param tabs ──────────────────────────────────────────────────────
+function switchParamTab(pane){
+  document.querySelectorAll('.ptab').forEach(t=>t.classList.toggle('sel',t.dataset.pane===pane));
+  document.getElementById('pane-detect').hidden=(pane!=='detect');
+  document.getElementById('pane-fh').hidden=(pane!=='fh');
+}
+document.querySelectorAll('.ptab').forEach(t=>{
+  t.addEventListener('click',()=>switchParamTab(t.dataset.pane));
 });
 
 // ─── Method selection ────────────────────────────────────────────────
@@ -1160,15 +1344,16 @@ document.querySelectorAll('.mbtn[data-m]').forEach(btn=>{
     document.querySelectorAll('.mbtn').forEach(b=>b.classList.remove('sel'));
     btn.classList.add('sel');
     if(curIdx>=0) FILES[curIdx].method=curMethod;
-    if (curMethod==='freehand') enterFreehand();
-    else if (freehandMode) exitFreehand();
-    document.getElementById('paramsDW').style.display =
-      (curMethod==='dualwall'||curMethod==='bandedge')?'block':'none';
+    if (curMethod==='freehand') { enterFreehand(); switchParamTab('fh'); }
+    else if (freehandMode) { exitFreehand(); switchParamTab('detect'); }
+    document.getElementById('paramsDW').style.display='block';
   });
 });
 
 // Sliders
 [['pBlur','vBlur'],['pSmooth','vSmooth'],['pLambda','vLambda'],['pMinGrad','vMinGrad'],
+ ['pEdgeOff','vEdgeOff'],['pMaxDev','vMaxDev'],
+ ['pFhSmooth','vFhSmooth'],['pFhBlend','vFhBlend'],['pFhMaxPts','vFhMaxPts'],
  ['trimS','vTrimS',v=>v+'%'],['trimE','vTrimE',v=>v+'%']].forEach(([id,vid,fmt])=>{
   const el=document.getElementById(id);
   if(!el) return;
@@ -1246,6 +1431,43 @@ function buildXLSX() {
   return wb;
 }
 
+// ─── Analysis log CSV builder ─────────────────────────────────────────
+function buildCSV() {
+  const done = FILES.filter(f => f.status === 'done' && f.results && f.results.length);
+  if (!done.length) return null;
+  const rows = [];
+  // Header
+  rows.push([
+    'filename', 'method', 'scale_px_per_mm',
+    'blur', 'smooth', 'lambda', 'minGrad', 'edgeOff', 'maxDev',
+    'point', 'pos_mm', 'w_px', 'w_mm'
+  ].join(','));
+  done.forEach(f => {
+    const sn = stemName(f);
+    const p  = f.params || {};
+    const sc = p.scale || getParam('pxPerMm') || 134;
+    const method   = f.method  || '';
+    const blur     = p.blur    ?? '';
+    const smooth   = p.smooth  ?? '';
+    const lambda   = p.lambda  ?? '';
+    const minGrad  = p.minGrad ?? '';
+    const edgeOff  = p.edgeOff ?? '';
+    const maxDev   = p.maxDev  ?? '';
+    f.results.forEach((r, i) => {
+      if (r.trimmed || r.w_px < 2) return;
+      const pos_mm = (r.pos_mm != null ? r.pos_mm : i).toFixed(4);
+      const w_px   = r.w_px.toFixed(2);
+      const w_mm   = r.w_mm.toFixed(4);
+      rows.push([
+        `"${sn}"`, method, sc,
+        blur, smooth, lambda, minGrad, edgeOff, maxDev,
+        i + 1, pos_mm, w_px, w_mm
+      ].join(','));
+    });
+  });
+  return rows.join('\r\n');
+}
+
 document.getElementById('btnCSV').addEventListener('click', () => {
   if (typeof XLSX === 'undefined') {
     alert('SheetJSが読み込まれていません。ネット接続を確認してください。');
@@ -1256,6 +1478,14 @@ document.getElementById('btnCSV').addEventListener('click', () => {
   const buf  = XLSX.write(wb, {bookType: 'xlsx', type: 'array'});
   const blob = new Blob([buf], {type: 'application/octet-stream'});
   triggerDownload(blob, 'OIT_results.xlsx');
+  // CSVも一緒に出力
+  const csv = buildCSV();
+  if (csv) {
+    setTimeout(() => {
+      const csvBlob = new Blob(['﻿' + csv], {type: 'text/csv;charset=utf-8'});
+      triggerDownload(csvBlob, 'OIT_analysis_log.csv');
+    }, 400);
+  }
 });
 
 // ─── Composite overlay image for any file ───────────────────────────
@@ -1298,37 +1528,72 @@ function compositeFile(f) {
 // ─── Image modal ─────────────────────────────────────────────────────
 let _modalFiles = [];
 
+function _imgCloseModal() {
+  document.getElementById('imgModal').hidden = true;
+  document.getElementById('imgScroll').innerHTML = '';
+}
+
+function _updateBulkBtn() {
+  const checked = document.querySelectorAll('#imgScroll .img-cb:checked').length;
+  document.getElementById('btnImgBulkSave').textContent = `⬇ 選択保存 (${checked})`;
+  document.getElementById('btnImgBulkSave').disabled = checked === 0;
+}
+
 function openImgModal(files) {
   _modalFiles = files;
   const scroll = document.getElementById('imgScroll');
   scroll.innerHTML = '';
-  files.forEach(f => {
+
+  files.forEach((f, idx) => {
     const dataUrl = compositeFile(f);
     const sn = stemName(f);
+
     const div = document.createElement('div');
     div.className = 'img-entry';
-    // Label row with download button
+
+    // ── Label row ──
     const lbl = document.createElement('div');
     lbl.className = 'img-label';
+
+    // Checkbox
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.className = 'img-cb';
+    cb.checked = true;
+    cb.dataset.idx = idx;
+    cb.addEventListener('change', () => {
+      div.classList.toggle('unchecked', !cb.checked);
+      _updateBulkBtn();
+    });
+
     const span = document.createElement('span');
     span.textContent = `${sn}  (${f.W}×${f.H}px)`;
+
     const dlBtn = document.createElement('button');
     dlBtn.className = 'dl-btn';
-    dlBtn.textContent = '⬇ 保存';
+    dlBtn.textContent = '⬇';
+    dlBtn.title = '個別保存';
     dlBtn.addEventListener('click', () => {
-      triggerDownload(dataUrlToBlob(dataUrl), sn);
+      triggerDownload(dataUrlToBlob(dataUrl), sn + '.png');
     });
+
+    lbl.appendChild(cb);
     lbl.appendChild(span);
     lbl.appendChild(dlBtn);
+
     const img = document.createElement('img');
     img.src = dataUrl; img.alt = f.name;
-    div.appendChild(lbl); div.appendChild(img);
+
+    div.appendChild(lbl);
+    div.appendChild(img);
     scroll.appendChild(div);
   });
+
   const n = files.length;
   document.getElementById('imgModalTitle').textContent =
-    n === 1 ? `オーバーレイ画像 — ${files[0].name}` : `オーバーレイ画像 — ${n}枚まとめて`;
+    n === 1 ? `オーバーレイ画像 — ${files[0].name}` : `オーバーレイ画像 — ${n}枚`;
   document.getElementById('imgModal').hidden = false;
+  _updateBulkBtn();
 }
 
 // 現在画像のみ
@@ -1346,15 +1611,47 @@ document.getElementById('btnImgAll').addEventListener('click', () => {
   openImgModal(done);
 });
 
-document.getElementById('btnImgClose').addEventListener('click', () => {
-  document.getElementById('imgModal').hidden = true;
-  document.getElementById('imgScroll').innerHTML = '';
+// 全選択 / 全解除
+document.getElementById('btnImgSelAll').addEventListener('click', () => {
+  document.querySelectorAll('#imgScroll .img-cb').forEach(cb => {
+    cb.checked = true;
+    cb.closest('.img-entry').classList.remove('unchecked');
+  });
+  _updateBulkBtn();
 });
+document.getElementById('btnImgSelNone').addEventListener('click', () => {
+  document.querySelectorAll('#imgScroll .img-cb').forEach(cb => {
+    cb.checked = false;
+    cb.closest('.img-entry').classList.add('unchecked');
+  });
+  _updateBulkBtn();
+});
+
+// 一括保存: チェックした画像を順番にダウンロード
+document.getElementById('btnImgBulkSave').addEventListener('click', () => {
+  const entries = document.querySelectorAll('#imgScroll .img-entry');
+  const toSave = [];
+  entries.forEach(entry => {
+    const cb = entry.querySelector('.img-cb');
+    if (cb && cb.checked) {
+      const idx = parseInt(cb.dataset.idx, 10);
+      const f = _modalFiles[idx];
+      if (f) toSave.push(f);
+    }
+  });
+  if (!toSave.length) return;
+  // ブラウザのDL制限回避のため500ms間隔でリクエスト
+  toSave.forEach((f, i) => {
+    setTimeout(() => {
+      const dataUrl = compositeFile(f);
+      triggerDownload(dataUrlToBlob(dataUrl), stemName(f) + '.png');
+    }, i * 500);
+  });
+});
+
+document.getElementById('btnImgClose').addEventListener('click', _imgCloseModal);
 document.getElementById('imgModal').addEventListener('click', e => {
-  if (e.target === document.getElementById('imgModal')) {
-    document.getElementById('imgModal').hidden = true;
-    document.getElementById('imgScroll').innerHTML = '';
-  }
+  if (e.target === document.getElementById('imgModal')) _imgCloseModal();
 });
 
 // ─── Share to Claude ─────────────────────────────────────────────────
@@ -1407,20 +1704,57 @@ document.getElementById('fileInput').addEventListener('change', e=>{
 
 // ─── FREEHAND MODE ───────────────────────────────────────────────────
 function enterFreehand() {
+  if(correctMode) exitCorrectMode();
   freehandMode=true;
   document.getElementById('fhBar').classList.add('vis');
+  document.getElementById('fhBar').querySelector('.label').textContent='手書きモード：';
+  document.getElementById('btnFhMeasure').textContent='測定';
   setActiveWall(1);
+  switchParamTab('fh');
   if(curIdx>=0) drawFhStrokes(FILES[curIdx]);
 }
 function exitFreehand() {
   freehandMode=false; isFhDrawing=false; fhStroke=[];
   document.getElementById('fhBar').classList.remove('vis');
+  switchParamTab('detect');
   if(curIdx>=0) redrawAxis(FILES[curIdx]);
+}
+function enterCorrectMode() {
+  if(freehandMode&&!correctMode) exitFreehand();
+  correctMode=true; freehandMode=true; corrHistory=[];
+  document.getElementById('fhBar').classList.add('vis');
+  document.getElementById('fhBar').querySelector('.label').textContent='訂正モード：';
+  document.getElementById('btnFhMeasure').textContent='再測定';
+  document.getElementById('btnCorrect').textContent='✕ 訂正終了';
+  document.getElementById('btnCorrect').style.background='var(--acc)';
+  setActiveWall(1);
+  switchParamTab('fh');
+  if(curIdx>=0){
+    const f=FILES[curIdx];
+    // Save base method name (strip any existing +訂正 suffix)
+    f._baseMethod = (f.method||'dualwall').replace(/\+訂正$/,'');
+    drawWallOverlay(f);
+    if(f.results) drawMeasureOverlay(f);
+    cCtx.clearRect(0,0,f.W,f.H);
+  }
+}
+function exitCorrectMode() {
+  correctMode=false; freehandMode=false; isFhDrawing=false; fhStroke=[]; corrHistory=[];
+  document.getElementById('fhBar').classList.remove('vis');
+  document.getElementById('btnCorrect').textContent='🖊 訂正モード';
+  document.getElementById('btnCorrect').style.background='';
+  switchParamTab('detect');
+  if(curIdx>=0){
+    const f=FILES[curIdx];
+    drawWallOverlay(f);
+    if(f.results) drawMeasureOverlay(f);
+    cCtx.clearRect(0,0,f.W,f.H);
+  }
 }
 function setActiveWall(w) {
   drawingWall=w;
-  document.getElementById('wallBtn1').classList.toggle('sel',w===1);
-  document.getElementById('wallBtn2').classList.toggle('sel',w===2);
+  ['wallBtn1','pWallBtn1'].forEach(id=>document.getElementById(id).classList.toggle('sel',w===1));
+  ['wallBtn2','pWallBtn2'].forEach(id=>document.getElementById(id).classList.toggle('sel',w===2));
 }
 
 function ptrToImgFh(e) {
@@ -1498,10 +1832,99 @@ clickC.addEventListener('pointermove', e=>{
     }
   }
 });
+function rasterizeStroke(pts, W) {
+  // Convert smoothed stroke [{x,y}...] to per-column y values.
+  // Returns {x1, x2, yArr: Float32Array} for columns x1..x2
+  if(!pts||pts.length<2) return null;
+  const sorted=[...pts].sort((a,b)=>a.x-b.x);
+  const x1=Math.max(0,Math.round(sorted[0].x));
+  const x2=Math.min(W-1,Math.round(sorted[sorted.length-1].x));
+  if(x2<=x1) return null;
+  const len=x2-x1+1;
+  const yArr=new Float32Array(len).fill(NaN);
+  for(let i=0;i<sorted.length-1;i++){
+    const ax=sorted[i].x, ay=sorted[i].y;
+    const bx=sorted[i+1].x, by=sorted[i+1].y;
+    const xi1=Math.round(ax), xi2=Math.round(bx);
+    for(let x=xi1;x<=xi2;x++){
+      if(x<x1||x>x2) continue;
+      const t=(xi1===xi2)?0:(x-xi1)/(xi2-xi1);
+      yArr[x-x1]=ay+t*(by-ay);
+    }
+  }
+  return {x1,x2,yArr};
+}
+
+function remeasureCorrect(f) {
+  // Re-measure after correction and redraw everything
+  f.binData = wallsToBin(f.topArr, f.botArr, f.W, f.H);
+  drawWallOverlay(f);
+  cCtx.clearRect(0, 0, f.W, f.H);
+  if (f.ptStart && f.ptEnd) {
+    const res = measureFile(f);
+    if (res) {
+      f.results = res;
+      f.status = 'done';
+      // Update method label: base+訂正 if any history exists, else base
+      const base = f._baseMethod || (f.method||'dualwall').replace(/\+訂正$/,'');
+      f._baseMethod = base;
+      f.method = corrHistory.length > 0 ? base + '+訂正' : base;
+      drawMeasureOverlay(f);
+      showResults(f);
+      renderFileList();
+    }
+  }
+}
+
+function applyCorrection(f, ras, sig=4) {
+  if(!ras||!f.topArr||!f.botArr) return;
+  const arr=drawingWall===1?f.topArr:f.botArr;
+  for(let x=ras.x1;x<=ras.x2;x++){
+    const yi=ras.yArr[x-ras.x1];
+    if(!isNaN(yi)) arr[x]=yi;
+  }
+  // Gaussian smooth correction zone with small window to blend edges
+  const R=Math.round(sig*2.5);
+  for(let x=ras.x1;x<=ras.x2;x++){
+    let sum=0,wt=0;
+    for(let dx=-R;dx<=R;dx++){
+      const xx=x+dx;
+      if(xx<0||xx>=f.W) continue;
+      const w=Math.exp(-dx*dx/(2*sig*sig));
+      sum+=arr[xx]*w; wt+=w;
+    }
+    if(wt>0) arr[x]=sum/wt;
+  }
+  // Ensure top < bot everywhere
+  for(let x=0;x<f.W;x++){
+    if(f.topArr[x]>=f.botArr[x]-2) {
+      if(drawingWall===1) f.topArr[x]=f.botArr[x]-2;
+      else f.botArr[x]=f.topArr[x]+2;
+    }
+  }
+}
+
 function finishFhStroke(){
   if(!isFhDrawing||!freehandMode||curIdx<0) return;
   isFhDrawing=false;
   const f=FILES[curIdx];
+
+  if(correctMode){
+    // Correction mode: merge stroke into topArr/botArr
+    if(fhDragged&&fhStroke.length>1&&f.topArr&&f.botArr){
+      const sm=smoothPts(fhStroke, getParam('pFhMaxPts')||600, getParam('pFhSmooth')||3);
+      const ras=rasterizeStroke(sm,f.W);
+      if(ras){
+        corrHistory.push({topArr:f.topArr.slice(),botArr:f.botArr.slice()});
+        if(corrHistory.length>30) corrHistory.shift();
+        applyCorrection(f, ras, getParam('pFhBlend')||4);
+        remeasureCorrect(f);
+      }
+    }
+    fhStroke=[]; fhStartPt=null; fhDragged=false;
+    return;
+  }
+
   if(!fhDragged){
     const pt=fhStartPt, ix=Math.round(pt.x), iy=Math.round(pt.y);
     if(!f.ptStart||(f.ptStart&&f.ptEnd)){
@@ -1511,7 +1934,7 @@ function finishFhStroke(){
     }
     document.getElementById('btnMeasure').disabled=!(f.ptStart&&f.ptEnd);
   } else if(fhStroke.length>1){
-    const sm=smoothPts(fhStroke);
+    const sm=smoothPts(fhStroke, getParam('pFhMaxPts')||600, getParam('pFhSmooth')||3);
     if(drawingWall===1) f.wall1=sm; else f.wall2=sm;
   }
   fhStroke=[]; fhStartPt=null; fhDragged=false;
@@ -1522,17 +1945,49 @@ clickC.addEventListener('pointercancel',e=>{e.preventDefault();finishFhStroke();
 
 document.getElementById('wallBtn1').addEventListener('click',()=>setActiveWall(1));
 document.getElementById('wallBtn2').addEventListener('click',()=>setActiveWall(2));
+document.getElementById('pWallBtn1').addEventListener('click',()=>setActiveWall(1));
+document.getElementById('pWallBtn2').addEventListener('click',()=>setActiveWall(2));
+document.getElementById('pBtnFhUndo').addEventListener('click',()=>
+  document.getElementById('btnFhUndo').click());
 document.getElementById('btnFhMeasure').addEventListener('click',()=>{
+  if(correctMode){
+    if(curIdx>=0){
+      const f=FILES[curIdx];
+      if(f.topArr&&f.botArr&&f.ptStart&&f.ptEnd){
+        remeasureCorrect(f);
+      }
+    }
+    return;
+  }
   document.getElementById('btnMeasure').click();
 });
 document.getElementById('btnFhUndo').addEventListener('click',()=>{
   if(curIdx<0) return; const f=FILES[curIdx];
+  if(correctMode){
+    if(corrHistory.length>0){
+      const prev=corrHistory.pop();
+      f.topArr=prev.topArr; f.botArr=prev.botArr;
+      remeasureCorrect(f);
+    }
+    return;
+  }
   if(drawingWall===1) f.wall1=null; else f.wall2=null;
   oCtx.clearRect(0,0,f.W,f.H); mCtx.putImageData(f.imgData,0,0);
   drawFhStrokes(f);
 });
 document.getElementById('btnFhClear').addEventListener('click',()=>{
   if(curIdx<0) return; const f=FILES[curIdx];
+  if(correctMode){
+    // In correction mode: reset walls to original auto-detected (if available from first history entry)
+    if(corrHistory.length>0){
+      const orig=corrHistory[0];
+      f.topArr=orig.topArr.slice(); f.botArr=orig.botArr.slice();
+      corrHistory=[];
+      f.binData=wallsToBin(f.topArr,f.botArr,f.W,f.H);
+      drawWallOverlay(f); cCtx.clearRect(0,0,f.W,f.H);
+    }
+    return;
+  }
   f.wall1=null; f.wall2=null; f.freehandResults=null;
   f.results=null; f.status='pend';
   oCtx.clearRect(0,0,f.W,f.H); mCtx.putImageData(f.imgData,0,0);
@@ -1541,13 +1996,16 @@ document.getElementById('btnFhClear').addEventListener('click',()=>{
   document.getElementById('rtbody').innerHTML='';
 });
 
-// Load TIFF library dynamically
-(function(){
-  const s=document.createElement('script');
-  s.src='https://unpkg.com/tiff@6.1.0/dist/tiff.min.js';
-  s.onerror=()=>console.warn('TIFF library failed to load — TIFF files not supported');
-  document.head.appendChild(s);
-})();
+document.getElementById('btnCorrect').addEventListener('click',()=>{
+  if(correctMode){ exitCorrectMode(); }
+  else {
+    if(curIdx<0) return;
+    const f=FILES[curIdx];
+    if(!f.topArr||!f.botArr){ alert('先に自動検出を実行してください。'); return; }
+    enterCorrectMode();
+  }
+});
+
 </script>
 </body>
 </html>
