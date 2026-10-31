@@ -141,11 +141,6 @@ body {
 #rtable tr.min-row td { color: var(--err) }
 #rtable tr.max-row td { color: var(--ok) }
 
-/* ── Freehand bar ── */
-#fhBar { background: var(--bg2); border-top: 1px solid var(--bg3);
-  padding: 6px 12px; display: none; align-items: center; gap: 8px; flex-shrink: 0 }
-#fhBar.vis { display: flex }
-#fhBar .label { font-size: 11px; color: var(--fg2) }
 .wallbtn { padding: 4px 10px; border-radius: var(--rad); border: 1px solid var(--fg3);
   background: var(--bg3); color: var(--fg2); cursor: pointer; font-size: 12px;
   font-weight: 500; transition: all .15s }
@@ -158,9 +153,6 @@ body {
 .fhbtn:hover { border-color: var(--fg2); color: var(--fg) }
 .fhbtn.go { border-color: var(--ok); color: var(--ok) }
 .fhbtn.go:hover { background: rgba(63,185,80,.1) }
-
-/* ── Share status ── */
-#shareStatus { font-size: 11px; color: var(--ok) }
 
 /* ── Image modal ── */
 #imgModal {
@@ -205,8 +197,8 @@ body {
   <h1>OITem Width Measurement</h1>
   <span class="badge">v2 standalone</span>
   <div class="spacer"></div>
-  <span id="shareStatus"></span>
-  <button class="hbtn" id="btnShare" disabled>📋 Claudeへ共有</button>
+  <input type="file" id="csvImportInput" accept=".csv" style="display:none">
+  <button class="hbtn" id="btnCsvImport">📂 CSV復元</button>
   <button class="hbtn" id="btnCSV" disabled>⬇ Excel保存</button>
   <button class="hbtn" id="btnImg" disabled>🖼 画像保存</button>
   <button class="hbtn" id="btnImgAll" disabled>🖼 全画像一覧</button>
@@ -303,6 +295,12 @@ body {
           <button class="wallbtn w2" id="pWallBtn2">壁2</button>
           <button class="fhbtn" id="pBtnFhUndo" style="margin-left:auto">Undo壁</button>
         </div>
+        <div id="fhActionBtns" hidden>
+          <button id="btnFhMeasure" style="width:100%;padding:7px;margin-bottom:6px;
+            background:var(--ok,#3fb950);border:none;border-radius:var(--rad);color:#fff;
+            font-weight:600;font-size:12px;cursor:pointer;transition:background .15s">手書き測定</button>
+          <button id="btnFhClear" class="fhbtn" style="width:100%;padding:5px 0;margin-bottom:6px">クリア</button>
+        </div>
         <button id="btnCorrect" disabled style="width:100%;padding:7px;margin-bottom:10px;
           background:var(--fg3,#666);border:none;border-radius:var(--rad);color:#fff;
           font-weight:600;font-size:12px;cursor:pointer;transition:background .15s">🖊 訂正モード</button>
@@ -388,17 +386,6 @@ body {
 </div>
 
 
-<!-- Freehand bar -->
-<div id="fhBar">
-  <span class="label">手書きモード：</span>
-  <button class="wallbtn w1 sel" id="wallBtn1">壁1</button>
-  <button class="wallbtn w2" id="wallBtn2">壁2</button>
-  <div class="fhsep"></div>
-  <button class="fhbtn go" id="btnFhMeasure">測定</button>
-  <button class="fhbtn" id="btnFhUndo">Undo壁</button>
-  <button class="fhbtn" id="btnFhClear">クリア</button>
-</div>
-
 <!-- ── SCRIPT ─────────────────────────────────────────────────── -->
 <script>
 'use strict';
@@ -427,6 +414,7 @@ let fhDragged     = false;
 const FH_THR      = 6;
 let correctMode   = false;
 let corrHistory   = [];
+let pendingRestore = new Map(); // baseName → restore data from CSV
 
 // ─── Helpers ────────────────────────────────────────────────────────
 function getParam(id) { return parseFloat(document.getElementById(id).value) || 0; }
@@ -1152,7 +1140,6 @@ function showResults(f) {
       <td>#${r.i}</td><td>${r.pos_mm.toFixed(3)}</td>
       <td>${Math.round(r.w_px)}</td><td>${r.w_mm.toFixed(4)}</td></tr>`;
   }).join('');
-  document.getElementById('btnShare').disabled=false;
   document.getElementById('btnCSV').disabled=false;
   document.getElementById('btnImg').disabled=false;
   document.getElementById('btnImgAll').disabled=false;
@@ -1182,6 +1169,12 @@ async function loadFiles(fileList) {
     FILES.push({name:file.name, imgData, gray, W, H, status:'pend',
                 method:curMethod, results:null, freehandResults:null,
                 ptStart:null, ptEnd:null, wall1:null, wall2:null });
+    // CSV復元データがあれば自動マッチング
+    const newF = FILES[FILES.length - 1];
+    const bname = baseName(newF);
+    if (pendingRestore.has(bname)) {
+      setTimeout(() => { applyRestore(newF, pendingRestore.get(bname)); }, 50);
+    }
     renderFileList();
   }
   if (curIdx < 0 && FILES.length > 0) selectFile(0);
@@ -1252,6 +1245,9 @@ function saveFileParams(f) {
     minGrad:  getParam('pMinGrad'),
     edgeOff:  getParam('pEdgeOff'),
     maxDev:   getParam('pMaxDev'),
+    trimS:    getParam('trimS'),
+    trimE:    getParam('trimE'),
+    nDiv:     getParam('nDiv'),
   };
 }
 
@@ -1432,6 +1428,8 @@ function buildXLSX() {
 }
 
 // ─── Analysis log CSV builder ─────────────────────────────────────────
+function baseName(f) { return f.name.replace(/\.[^.]+$/, ''); }
+
 function buildCSV() {
   const done = FILES.filter(f => f.status === 'done' && f.results && f.results.length);
   if (!done.length) return null;
@@ -1440,10 +1438,11 @@ function buildCSV() {
   rows.push([
     'filename', 'method', 'scale_px_per_mm',
     'blur', 'smooth', 'lambda', 'minGrad', 'edgeOff', 'maxDev',
+    'p1x', 'p1y', 'p2x', 'p2y', 'trimS', 'trimE', 'nDiv',
     'point', 'pos_mm', 'w_px', 'w_mm'
   ].join(','));
   done.forEach(f => {
-    const sn = stemName(f);
+    const sn = baseName(f);
     const p  = f.params || {};
     const sc = p.scale || getParam('pxPerMm') || 134;
     const method   = f.method  || '';
@@ -1453,6 +1452,13 @@ function buildCSV() {
     const minGrad  = p.minGrad ?? '';
     const edgeOff  = p.edgeOff ?? '';
     const maxDev   = p.maxDev  ?? '';
+    const p1x = f.ptStart ? Math.round(f.ptStart.x) : '';
+    const p1y = f.ptStart ? Math.round(f.ptStart.y) : '';
+    const p2x = f.ptEnd   ? Math.round(f.ptEnd.x)   : '';
+    const p2y = f.ptEnd   ? Math.round(f.ptEnd.y)   : '';
+    const trimS_v = p.trimS ?? '';
+    const trimE_v = p.trimE ?? '';
+    const nDiv_v  = p.nDiv  ?? '';
     f.results.forEach((r, i) => {
       if (r.trimmed || r.w_px < 2) return;
       const pos_mm = (r.pos_mm != null ? r.pos_mm : i).toFixed(4);
@@ -1461,6 +1467,7 @@ function buildCSV() {
       rows.push([
         `"${sn}"`, method, sc,
         blur, smooth, lambda, minGrad, edgeOff, maxDev,
+        p1x, p1y, p2x, p2y, trimS_v, trimE_v, nDiv_v,
         i + 1, pos_mm, w_px, w_mm
       ].join(','));
     });
@@ -1486,6 +1493,108 @@ document.getElementById('btnCSV').addEventListener('click', () => {
       triggerDownload(csvBlob, 'OIT_analysis_log.csv');
     }, 400);
   }
+});
+
+// ─── CSV restore import ─────────────────────────────────────────────
+function parseCSVLine(line) {
+  const cols = []; let cur = '', inQ = false;
+  for (const ch of line) {
+    if (ch === '"') { inQ = !inQ; }
+    else if (ch === ',' && !inQ) { cols.push(cur); cur = ''; }
+    else { cur += ch; }
+  }
+  cols.push(cur);
+  return cols;
+}
+
+function restoreSliders(rd) {
+  const set = (id, val, dispId, suf='') => {
+    if (val == null || isNaN(+val)) return;
+    const el = document.getElementById(id); if (el) el.value = +val;
+    if (dispId) { const d = document.getElementById(dispId); if (d) d.textContent = +val + suf; }
+  };
+  set('pxPerMm', rd.scale);
+  set('pBlur',    rd.blur,    'vBlur');
+  set('pSmooth',  rd.smooth,  'vSmooth');
+  set('pLambda',  rd.lambda,  'vLambda');
+  set('pMinGrad', rd.minGrad, 'vMinGrad');
+  set('pEdgeOff', rd.edgeOff, 'vEdgeOff');
+  set('pMaxDev',  rd.maxDev,  'vMaxDev');
+  set('trimS',    rd.trimS,   'vTrimS', '%');
+  set('trimE',    rd.trimE,   'vTrimE', '%');
+  set('nDiv',     rd.nDiv);
+}
+
+function applyRestore(f, rd) {
+  if (isNaN(rd.p1x) || isNaN(rd.p2x)) return false;
+  f.ptStart = {x: rd.p1x, y: rd.p1y};
+  f.ptEnd   = {x: rd.p2x, y: rd.p2y};
+  f.method  = rd.method || 'dualwall';
+  curMethod = f.method;
+  document.querySelectorAll('.mbtn').forEach(b => b.classList.toggle('sel', b.dataset.m === curMethod));
+  restoreSliders(rd);
+  runDetect(f);
+  const res = measureFile(f);
+  if (!res) return false;
+  saveFileParams(f);
+  f.results = res;
+  f.status  = 'done';
+  drawMeasureOverlay(f);
+  if (curIdx >= 0 && FILES[curIdx] === f) {
+    redrawAxis(f);
+    showResults(f);
+    document.getElementById('btnRedetect').disabled = false;
+    document.getElementById('btnCorrect').disabled  = false;
+  }
+  renderFileList();
+  return true;
+}
+
+document.getElementById('btnCsvImport').addEventListener('click', () => {
+  document.getElementById('csvImportInput').click();
+});
+
+document.getElementById('csvImportInput').addEventListener('change', async e => {
+  const file = e.target.files[0]; if (!file) return;
+  e.target.value = '';
+  let text;
+  try { text = await file.text(); } catch { alert('ファイルを読み込めませんでした'); return; }
+  const lines = text.replace(/^﻿/, '').split(/\r?\n/).filter(l => l.trim());
+  if (lines.length < 2) { alert('有効なCSVではありません'); return; }
+  const headers = parseCSVLine(lines[0]).map(h => h.trim().replace(/^"|"$/g,''));
+  const idx = h => headers.indexOf(h);
+  if (idx('p1x') < 0 || idx('filename') < 0) {
+    alert('このCSVには復元データ（P1/P2座標）が含まれていません。\n新しいバージョンのツールで保存したCSVを使用してください。'); return;
+  }
+  pendingRestore.clear();
+  for (let i = 1; i < lines.length; i++) {
+    const cols = parseCSVLine(lines[i]);
+    const fn = (cols[idx('filename')] || '').replace(/^"|"$/g,'').trim();
+    if (!fn || pendingRestore.has(fn)) continue;
+    const g = k => { const v = cols[idx(k)]; return (v !== '' && v != null) ? +v : NaN; };
+    const rd = {
+      method:  (cols[idx('method')] || 'dualwall').trim(),
+      scale:   g('scale_px_per_mm') || 134,
+      blur:    g('blur'),    smooth:  g('smooth'),
+      lambda:  g('lambda'),  minGrad: g('minGrad'),
+      edgeOff: g('edgeOff'), maxDev:  g('maxDev'),
+      p1x: g('p1x'), p1y: g('p1y'),
+      p2x: g('p2x'), p2y: g('p2y'),
+      trimS:   g('trimS'), trimE:    g('trimE'),
+      nDiv:    g('nDiv'),
+    };
+    if (!isNaN(rd.p1x) && !isNaN(rd.p2x)) pendingRestore.set(fn, rd);
+  }
+  let matched = 0;
+  FILES.forEach(f => {
+    const key = baseName(f);
+    if (pendingRestore.has(key)) { if (applyRestore(f, pendingRestore.get(key))) matched++; }
+  });
+  const total = pendingRestore.size;
+  const pending = total - matched;
+  let msg = `CSV復元: ${total}件中 ${matched}件を復元しました`;
+  if (pending > 0) msg += `\n残り${pending}件は画像を読み込むと自動適用されます`;
+  alert(msg);
 });
 
 // ─── Composite overlay image for any file ───────────────────────────
@@ -1654,40 +1763,6 @@ document.getElementById('imgModal').addEventListener('click', e => {
   if (e.target === document.getElementById('imgModal')) _imgCloseModal();
 });
 
-// ─── Share to Claude ─────────────────────────────────────────────────
-document.getElementById('btnShare').addEventListener('click', ()=>{
-  if(curIdx<0) return;
-  const f=FILES[curIdx]; if(!f.results) return;
-  const pxPerMm=getParam('pxPerMm')||134;
-  const act=f.results.filter(r=>!r.trimmed&&r.w_mm>0);
-  const ws=act.map(r=>r.w_mm);
-  const avg=ws.reduce((a,b)=>a+b,0)/ws.length;
-  const sd=ws.length>1?Math.sqrt(ws.map(v=>(v-avg)**2).reduce((a,b)=>a+b,0)/(ws.length-1)):0;
-  const lines=['=== OIT Microfluidics 測定レポート ===',
-    `画像: ${f.name}`, `サイズ: ${f.W}×${f.H}px`,
-    `スケール: ${pxPerMm} px/mm`, `測定方法: ${f.method||'auto'}`,
-    '',`--- 統計 ---`,`測定点数: ${ws.length}`,
-    `最小幅: ${Math.min(...ws).toFixed(4)} mm`,
-    `最大幅: ${Math.max(...ws).toFixed(4)} mm`,
-    `平均幅: ${avg.toFixed(4)} mm`, `標準偏差: ${sd.toFixed(4)} mm`,
-    `CV: ${(sd/avg*100).toFixed(2)}%`,
-    '','--- 測定値 (pos_mm, w_px, w_mm) ---',
-    ...act.map(r=>`${r.pos_mm.toFixed(3)}\t${Math.round(r.w_px)}\t${r.w_mm.toFixed(4)}`),
-    '',`--- Claudeへ ---`,
-    f.method==='freehand'
-      ? 'これは手書きモードで測定した正解データです。自動検出アルゴリズムの改善に活用してください。'
-      : `自動検出 (${f.method}) の結果です。手書きとの差異や改善点を教えてください。`
-  ];
-  const text=lines.join('\n');
-  navigator.clipboard.writeText(text).catch(()=>{
-    const ta=document.createElement('textarea');
-    ta.value=text; ta.style.cssText='position:fixed;opacity:0';
-    document.body.appendChild(ta); ta.select(); document.execCommand('copy');
-    document.body.removeChild(ta);
-  });
-  const st=document.getElementById('shareStatus');
-  st.textContent='✓ コピー完了'; setTimeout(()=>st.textContent='',2500);
-});
 
 // ─── File drop / input ───────────────────────────────────────────────
 const dz=document.getElementById('dropZone');
@@ -1706,24 +1781,21 @@ document.getElementById('fileInput').addEventListener('change', e=>{
 function enterFreehand() {
   if(correctMode) exitCorrectMode();
   freehandMode=true;
-  document.getElementById('fhBar').classList.add('vis');
-  document.getElementById('fhBar').querySelector('.label').textContent='手書きモード：';
-  document.getElementById('btnFhMeasure').textContent='測定';
+  document.getElementById('fhActionBtns').hidden=false;
+  document.getElementById('btnFhMeasure').textContent='手書き測定';
   setActiveWall(1);
   switchParamTab('fh');
   if(curIdx>=0) drawFhStrokes(FILES[curIdx]);
 }
 function exitFreehand() {
   freehandMode=false; isFhDrawing=false; fhStroke=[];
-  document.getElementById('fhBar').classList.remove('vis');
+  document.getElementById('fhActionBtns').hidden=true;
   switchParamTab('detect');
   if(curIdx>=0) redrawAxis(FILES[curIdx]);
 }
 function enterCorrectMode() {
   if(freehandMode&&!correctMode) exitFreehand();
   correctMode=true; freehandMode=true; corrHistory=[];
-  document.getElementById('fhBar').classList.add('vis');
-  document.getElementById('fhBar').querySelector('.label').textContent='訂正モード：';
   document.getElementById('btnFhMeasure').textContent='再測定';
   document.getElementById('btnCorrect').textContent='✕ 訂正終了';
   document.getElementById('btnCorrect').style.background='var(--acc)';
@@ -1740,7 +1812,6 @@ function enterCorrectMode() {
 }
 function exitCorrectMode() {
   correctMode=false; freehandMode=false; isFhDrawing=false; fhStroke=[]; corrHistory=[];
-  document.getElementById('fhBar').classList.remove('vis');
   document.getElementById('btnCorrect').textContent='🖊 訂正モード';
   document.getElementById('btnCorrect').style.background='';
   switchParamTab('detect');
@@ -1753,8 +1824,8 @@ function exitCorrectMode() {
 }
 function setActiveWall(w) {
   drawingWall=w;
-  ['wallBtn1','pWallBtn1'].forEach(id=>document.getElementById(id).classList.toggle('sel',w===1));
-  ['wallBtn2','pWallBtn2'].forEach(id=>document.getElementById(id).classList.toggle('sel',w===2));
+  document.getElementById('pWallBtn1').classList.toggle('sel',w===1);
+  document.getElementById('pWallBtn2').classList.toggle('sel',w===2);
 }
 
 function ptrToImgFh(e) {
@@ -1943,25 +2014,9 @@ function finishFhStroke(){
 clickC.addEventListener('pointerup',   e=>{e.preventDefault();finishFhStroke();});
 clickC.addEventListener('pointercancel',e=>{e.preventDefault();finishFhStroke();});
 
-document.getElementById('wallBtn1').addEventListener('click',()=>setActiveWall(1));
-document.getElementById('wallBtn2').addEventListener('click',()=>setActiveWall(2));
 document.getElementById('pWallBtn1').addEventListener('click',()=>setActiveWall(1));
 document.getElementById('pWallBtn2').addEventListener('click',()=>setActiveWall(2));
-document.getElementById('pBtnFhUndo').addEventListener('click',()=>
-  document.getElementById('btnFhUndo').click());
-document.getElementById('btnFhMeasure').addEventListener('click',()=>{
-  if(correctMode){
-    if(curIdx>=0){
-      const f=FILES[curIdx];
-      if(f.topArr&&f.botArr&&f.ptStart&&f.ptEnd){
-        remeasureCorrect(f);
-      }
-    }
-    return;
-  }
-  document.getElementById('btnMeasure').click();
-});
-document.getElementById('btnFhUndo').addEventListener('click',()=>{
+document.getElementById('pBtnFhUndo').addEventListener('click',()=>{
   if(curIdx<0) return; const f=FILES[curIdx];
   if(correctMode){
     if(corrHistory.length>0){
@@ -1974,6 +2029,18 @@ document.getElementById('btnFhUndo').addEventListener('click',()=>{
   if(drawingWall===1) f.wall1=null; else f.wall2=null;
   oCtx.clearRect(0,0,f.W,f.H); mCtx.putImageData(f.imgData,0,0);
   drawFhStrokes(f);
+});
+document.getElementById('btnFhMeasure').addEventListener('click',()=>{
+  if(correctMode){
+    if(curIdx>=0){
+      const f=FILES[curIdx];
+      if(f.topArr&&f.botArr&&f.ptStart&&f.ptEnd){
+        remeasureCorrect(f);
+      }
+    }
+    return;
+  }
+  document.getElementById('btnMeasure').click();
 });
 document.getElementById('btnFhClear').addEventListener('click',()=>{
   if(curIdx<0) return; const f=FILES[curIdx];
